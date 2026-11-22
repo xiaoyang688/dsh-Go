@@ -1,6 +1,6 @@
 // A build on an OS without Android's own concepts (HarmonyOS): none of them
 // show anywhere, in the hub, 全部功能, search, links, the pages that mention
-// them or first run; the relay goes straight to its server. And on Android,
+// them or first run. And on Android,
 // every one is still there.
 
 import 'package:dsh_app/links/page_links.dart';
@@ -9,6 +9,7 @@ import 'package:dsh_app/pets/pet_prefs.dart';
 import 'package:dsh_app/pets/pet_signals.dart';
 import 'package:dsh_app/remote/relay/dsh_remote_backend.dart';
 import 'package:dsh_app/remote/relay/webrtc_peer.dart';
+import 'package:dsh_app/remote/relay/ohos_webrtc_peer.dart';
 import 'package:dsh_app/remote/secret_store.dart';
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
@@ -716,39 +717,31 @@ void main() {
   });
 
   group('relay', () {
-    DshRemoteRelayBackend backend({required bool webRtc}) {
+    DshRemoteRelayBackend backend(String os) {
       final container = ProviderContainer(
         overrides: [
           secretStoreProvider.overrideWithValue(MemorySecretStore()),
-          webRtcAvailableProvider.overrideWithValue(webRtc),
+          operatingSystemProvider.overrideWithValue(os),
         ],
       );
       addTearDown(container.dispose);
       return container.read(relayBackendProvider) as DshRemoteRelayBackend;
     }
 
-    test('on Android: direct first', () {
-      final relay = backend(webRtc: true);
-      expect(relay.peerConnector, flutterPeerConnector);
-      expect(relay.account.peerConnector, flutterPeerConnector);
-    });
-
-    test('on HarmonyOS: straight to the relay', () {
-      final relay = backend(webRtc: false);
-      expect(relay.peerConnector, isNull);
-      expect(relay.account.peerConnector, isNull);
-    });
+    for (final os in ['android', 'ios', 'ohos']) {
+      test('$os starts the account with its platform peer', () {
+        final relay = backend(os);
+        final connector = os == 'ohos' ? ohosPeerConnector : flutterPeerConnector;
+        expect(relay.peerConnector, connector);
+        expect(relay.account.peerConnector, connector);
+        expect(relay.account.tryLanFirst, os == 'ohos');
+      });
+    }
   });
 
   test("Android's own system features stay off HarmonyOS and iOS", () {
     expect(androidSystemFeaturesOn('android'), isTrue);
     expect(androidSystemFeaturesOn('ohos'), isFalse);
     expect(androidSystemFeaturesOn('ios'), isFalse);
-  });
-
-  test('turning those off on iOS leaves its WebRTC path alone', () {
-    expect(webRtcOn('android'), isTrue);
-    expect(webRtcOn('ios'), isTrue);
-    expect(webRtcOn('ohos'), isFalse);
   });
 }

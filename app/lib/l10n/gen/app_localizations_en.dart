@@ -10548,12 +10548,6 @@ class L10nEn extends L10n {
   String get harmonyVoiceSystemUnavailable => 'The system\'s speech recognition isn\'t available';
 
   @override
-  String get harmonyNetworkRelayOnly => 'This version goes through the relay, end-to-end encrypted the whole way.';
-
-  @override
-  String get harmonyNetworkFallbackRelayOnly => 'This version only uses the relay';
-
-  @override
   String get harmonySetupStay => 'Stay on this page while it installs';
 
   @override

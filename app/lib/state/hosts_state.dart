@@ -481,13 +481,13 @@ final relayServerProvider = NotifierProvider<RelayServerController, String?>(Rel
 /// override with a fake; [UnavailableRelayBackend] turns the native relay off.
 final relayBackendProvider = Provider<RelayBackend>((ref) {
   final history = ref.read(remoteCompactHistoryProvider.notifier);
+  final os = ref.watch(operatingSystemProvider);
   final backend = DshRemoteRelayBackend(
     secrets: ref.watch(secretStoreProvider),
     serverUrl: ref.watch(relayServerProvider),
     clientVersion: AppInfo.version.split('+').first,
-    // flutter_webrtc has no HarmonyOS implementation: straight to the relay,
-    // not two handshakes that fail on the way there.
-    peerConnector: ref.watch(webRtcAvailableProvider) ? flutterPeerConnector : null,
+    peerConnector: peerConnectorFor(os),
+    tryLanFirst: os == 'ohos',
     loadCompactHistory: () async {
       await history.ready;
       return ref.read(remoteCompactHistoryProvider);

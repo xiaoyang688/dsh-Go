@@ -233,6 +233,15 @@ _Scope _scope(JsonMap? candidate) {
 
 bool _isLocal(_Scope scope) => scope == _Scope.private || scope == _Scope.linkLocal || scope == _Scope.loopback;
 
+/// Locally reachable host candidates for the LAN-first signaling window.
+/// Browsers may obscure a host address with an mDNS name.
+bool isLanHostCandidate(String line) {
+  final fields = line.trim().split(RegExp(r'\s+'));
+  if (fields.length < 8 || fields[6] != 'typ' || fields[7] != 'host') return false;
+  final address = fields[4];
+  return address.toLowerCase().endsWith('.local') || _isLocal(_scope({'address': address}));
+}
+
 bool _isLanPair(Object? localType, Object? remoteType, _Scope local, _Scope remote) {
   bool explicitlyRemote(_Scope s) => s == _Scope.public || s == _Scope.cgnat || s == _Scope.reserved;
   if (localType == 'host' && remoteType == 'host') return !explicitlyRemote(local) && !explicitlyRemote(remote);

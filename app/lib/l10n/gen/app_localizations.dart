@@ -18456,18 +18456,6 @@ abstract class L10n {
   /// **'系统语音识别不可用'**
   String get harmonyVoiceSystemUnavailable;
 
-  /// No description provided for @harmonyNetworkRelayOnly.
-  ///
-  /// In zh, this message translates to:
-  /// **'当前版本走 Relay 中继，全程端到端加密。'**
-  String get harmonyNetworkRelayOnly;
-
-  /// No description provided for @harmonyNetworkFallbackRelayOnly.
-  ///
-  /// In zh, this message translates to:
-  /// **'当前版本只走 Relay 中继'**
-  String get harmonyNetworkFallbackRelayOnly;
-
   /// No description provided for @harmonySetupStay.
   ///
   /// In zh, this message translates to:

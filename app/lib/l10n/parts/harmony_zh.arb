@@ -94,8 +94,6 @@
   "harmonyVoiceSystemHintChinese": "使用系统的语音识别，只认中文",
   "harmonyVoiceAutoHint": "有 DeepSeek 账号或 API Key 时用 DeepSeek，否则用系统识别",
   "harmonyVoiceSystemUnavailable": "系统语音识别不可用",
-  "harmonyNetworkRelayOnly": "当前版本走 Relay 中继，全程端到端加密。",
-  "harmonyNetworkFallbackRelayOnly": "当前版本只走 Relay 中继",
   "harmonySetupStay": "安装时请留在这个页面",
   "harmonyLaunchEmbedded": "应用内启动",
   "harmonyLaunchNodeExited": "引擎已退出",

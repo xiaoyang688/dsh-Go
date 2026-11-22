@@ -12,6 +12,7 @@ import 'package:dsh_app/ui/remote/remote_screen.dart';
 import 'package:dsh_app/ui/settings/settings_widgets.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -93,6 +94,22 @@ void main() {
     );
     await frames(tester);
   }
+
+  test('status becoming connected during initial snapshot delivery reaches the UI provider', () async {
+    final link = _InspectableLink(const HostLinkStatus(HostLinkPhase.connecting, step: HostLinkStep.connect));
+    final container = ProviderContainer(overrides: [hostLinkProvider.overrideWith((ref, host) => link)]);
+    addTearDown(link.changes.close);
+    addTearDown(container.dispose);
+    final provider = hostLinkStatusProvider(_host);
+    container.listen(provider, (_, next) {
+      if (next.value?.phase == HostLinkPhase.connecting) {
+        link.emit(const HostLinkStatus(HostLinkPhase.connected, path: RelayPath.p2p));
+      }
+    });
+    await pumpEventQueue();
+    expect(link.status.isConnected, isTrue);
+    expect(container.read(provider).value?.path, RelayPath.p2p);
+  });
 
   testWidgets('automatic routing has no direct toggle or stale search setting', (tester) async {
     await pump(tester, _InspectableLink(HostLinkStatus.idle), page: true);
@@ -230,30 +247,21 @@ void main() {
     expect(link.status.isConnected, isTrue);
   });
 
-  group('without a direct path to try (HarmonyOS)', () {
-    final zh = lookupL10n(AppLocale.zhCN);
-    _InspectableLink relayOnly() => _InspectableLink(
-      const HostLinkStatus(
-        HostLinkPhase.connected,
-        path: RelayPath.relay,
-        network: RemoteNetworkStatus(path: RelayPath.relay, fallbackReason: 'webrtcUnavailable'),
-      ),
-    );
-
-    testWidgets('on HarmonyOS: the relay is simply how this version connects', (tester) async {
-      await pump(tester, relayOnly(), os: 'ohos');
-      expect(find.textContaining(zh.harmonyNetworkRelayOnly), findsOneWidget);
-      expect(find.text(zh.harmonyNetworkFallbackRelayOnly), findsOneWidget);
-      expect(find.textContaining('LAN → P2P'), findsNothing);
-      expect(find.text(zh.remoteNetworkFallbackWebrtcUnavailable), findsNothing);
-    });
-
-    testWidgets('on Android: the order it tries, and the device at fault', (tester) async {
-      await pump(tester, relayOnly(), os: 'android');
+  for (final os in ['android', 'ohos']) {
+    testWidgets('$os shows the automatic route order and actual fallback reason', (tester) async {
+      final zh = lookupL10n(AppLocale.zhCN);
+      final link = _InspectableLink(
+        const HostLinkStatus(
+          HostLinkPhase.connected,
+          path: RelayPath.relay,
+          network: RemoteNetworkStatus(path: RelayPath.relay, fallbackReason: 'webrtcUnavailable'),
+        ),
+      );
+      await pump(tester, link, os: os);
       expect(find.textContaining(zh.remoteNetworkAutomatic), findsOneWidget);
       expect(find.text(zh.remoteNetworkFallbackWebrtcUnavailable), findsOneWidget);
     });
-  });
+  }
 
   testWidgets('fallback codes are explained in the current language', (tester) async {
     final link = _InspectableLink(

@@ -68,8 +68,11 @@ class WebRtcTransport implements LeaseAwareTransport {
     Duration timeout = const Duration(seconds: 8),
     Duration iceServersTimeout = const Duration(seconds: 10),
     bool relayOnly = false,
+    bool lanOnly = false,
   }) async {
-    final transport = WebRtcTransport._(control).._relayOnly = relayOnly;
+    final transport = WebRtcTransport._(control)
+      .._relayOnly = relayOnly
+      .._lanOnly = lanOnly;
     try {
       await transport._negotiate(connector, iceServers, timeout, iceServersTimeout);
       return transport;
@@ -94,6 +97,7 @@ class WebRtcTransport implements LeaseAwareTransport {
   Duration? _roundTripTime;
   RemotePeerNetworkInfo? _peerNetwork;
   bool _relayOnly = false;
+  bool _lanOnly = false;
   bool _answering = false;
   final RtcChunkCodec _outgoing = RtcChunkCodec();
   final RtcChunkCodec _incoming = RtcChunkCodec();
@@ -163,7 +167,7 @@ class WebRtcTransport implements LeaseAwareTransport {
     final connectionId = _control.info.connectionId;
     var servers = const <RemoteIceServer>[];
     try {
-      servers = await fetchIceServers(connectionId).timeout(iceServersTimeout);
+      if (!_lanOnly) servers = await fetchIceServers(connectionId).timeout(iceServersTimeout);
     } on Object {
       // No STUN / TURN: host candidates can still reach a Host on the LAN.
     }
@@ -180,7 +184,11 @@ class WebRtcTransport implements LeaseAwareTransport {
     }
     const ceiling = Duration(seconds: 15);
     final serverTimeout = _control.webrtcFallbackTimeout;
-    final timeout = serverTimeout == null ? localTimeout : (serverTimeout > ceiling ? ceiling : serverTimeout);
+    final budget = serverTimeout == null ? localTimeout : (serverTimeout > ceiling ? ceiling : serverTimeout);
+    // Host candidates need no STUN lookup. Bound the LAN head start before
+    // retrying with a fresh peer that can gather reflexive candidates.
+    const lanWindow = Duration(seconds: 2);
+    final timeout = _lanOnly && budget > lanWindow ? lanWindow : budget;
     final RemotePeerConnection peer;
     try {
       // The deadline includes native creation and offer generation: either
@@ -204,6 +212,9 @@ class WebRtcTransport implements LeaseAwareTransport {
     final path = await _selectedPath(peer);
     _check();
     _actualMode = path;
+    if (_lanOnly && path != RemoteTransportMode.lan) {
+      throw const WebRtcUnavailable('No verified LAN pair.');
+    }
     if (!_relayOnly && path == RemoteTransportMode.turn) {
       throw const WebRtcUnavailable('TURN was selected during a direct-only attempt.');
     }
@@ -234,7 +245,7 @@ class WebRtcTransport implements LeaseAwareTransport {
         iceTransportPolicy: _relayOnly ? RemoteIceTransportPolicy.relay : RemoteIceTransportPolicy.all,
         onIceCandidate: (candidate) {
           if (_closed) return;
-          if (!_relayOnly && _isRelayCandidate(candidate)) return;
+          if (!_allowsCandidate(candidate)) return;
           final early = _earlyCandidates;
           if (early != null) {
             early.add(candidate);
@@ -269,7 +280,7 @@ class WebRtcTransport implements LeaseAwareTransport {
     _check();
     final offer = await peer.createOffer(remoteDataChannelLabel);
     _check();
-    _control.sendSignal('signal.offer', {'sdp': _relayOnly ? offer : _withoutRelayCandidates(offer)});
+    _control.sendSignal('signal.offer', {'sdp': _filterSdp(offer)});
     final early = _earlyCandidates!;
     _earlyCandidates = null;
     for (final candidate in early) {
@@ -336,10 +347,10 @@ class WebRtcTransport implements LeaseAwareTransport {
         if (_answered || _answering) return;
         _answering = true;
         final answer = p['sdp']! as String;
-        unawaited(_applyAnswer(peer, _relayOnly ? answer : _withoutRelayCandidates(answer)));
+        unawaited(_applyAnswer(peer, _filterSdp(answer)));
       case 'signal.ice':
         final candidate = asMap(p['candidate'])!;
-        if (!_relayOnly && _isRelayCandidate(candidate)) return;
+        if (!_allowsCandidate(candidate)) return;
         if (_answered) {
           unawaited(peer.addIceCandidate(candidate).catchError((Object _) {}));
         } else {
@@ -351,13 +362,18 @@ class WebRtcTransport implements LeaseAwareTransport {
     }
   }
 
-  static bool _isRelayCandidate(JsonMap candidate) =>
-      RegExp(r'(?:^|\s)typ\s+relay(?:\s|$)', caseSensitive: false).hasMatch('${candidate['candidate'] ?? ''}');
+  bool _allowsCandidate(JsonMap candidate) {
+    final line = '${candidate['candidate'] ?? ''}';
+    if (_lanOnly) return isLanHostCandidate(line);
+    return _relayOnly || !RegExp(r'(?:^|\s)typ\s+relay(?:\s|$)', caseSensitive: false).hasMatch(line);
+  }
 
-  static String _withoutRelayCandidates(String sdp) => sdp
-      .split('\n')
-      .where((line) => !line.trimLeft().startsWith('a=candidate:') || !_isRelayCandidate({'candidate': line}))
-      .join('\n');
+  String _filterSdp(String sdp) => _relayOnly
+      ? sdp
+      : sdp
+            .split('\n')
+            .where((line) => !line.trimLeft().startsWith('a=candidate:') || _allowsCandidate({'candidate': line}))
+            .join('\n');
 
   Future<void> _applyAnswer(RemotePeerConnection peer, String sdp) async {
     try {

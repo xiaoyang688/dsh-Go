@@ -378,6 +378,7 @@ class RemoteAccount {
     this.controlTracer,
     this.peerConnector,
     this.preferredTransports,
+    this.tryLanFirst = false,
     this.onDirectFallback,
     this.compactHistory = false,
     this.directTimeout = const Duration(seconds: 8),
@@ -413,6 +414,9 @@ class RemoteAccount {
   /// Optional native network hint. Actual selection still requires a working
   /// ICE pair. Exceptions or a stalled hint retain automatic defaults.
   Future<List<RemoteTransportMode>> Function()? preferredTransports;
+
+  /// Give local host candidates a bounded first attempt on LAN-eligible routes.
+  final bool tryLanFirst;
 
   /// Payload-free fallback code ([RemoteNetworkFallbackReason.name]), never
   /// raw native exception text, SDP or candidate addresses.
@@ -1497,6 +1501,28 @@ class RemoteAccount {
       return _TransportSelection(control, RemoteNetworkFallbackReason.webrtcUnavailable);
     }
     try {
+      if (tryLanFirst &&
+          wantDirect &&
+          preferred.contains(RemoteTransportMode.lan) &&
+          control.directTransports.contains('lan')) {
+        try {
+          final rtc = await WebRtcTransport.negotiate(
+            control: control,
+            connector: connector,
+            iceServers: fetchIce,
+            timeout: directTimeout,
+            lanOnly: true,
+          );
+          return _TransportSelection(rtc, reason);
+        } on WebRtcUnavailable {
+          // One offer per Host tunnel: retire LAN before negotiating with STUN.
+          await control.close();
+          control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);
+          if (control.directTransports.isEmpty) {
+            return _TransportSelection(control, RemoteNetworkFallbackReason.webrtcUnavailable);
+          }
+        }
+      }
       wantDirect = wantDirect && control.directTransports.any((p) => p == 'lan' || p == 'p2p');
       wantTurn = wantTurn && control.directTransports.contains('turn');
       var directFailed = false;

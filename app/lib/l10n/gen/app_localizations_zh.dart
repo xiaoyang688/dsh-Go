@@ -9973,12 +9973,6 @@ class L10nZh extends L10n {
   String get harmonyVoiceSystemUnavailable => '系统语音识别不可用';
 
   @override
-  String get harmonyNetworkRelayOnly => '当前版本走 Relay 中继，全程端到端加密。';
-
-  @override
-  String get harmonyNetworkFallbackRelayOnly => '当前版本只走 Relay 中继';
-
-  @override
   String get harmonySetupStay => '安装时请留在这个页面';
 
   @override

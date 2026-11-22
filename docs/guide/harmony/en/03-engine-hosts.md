@@ -116,7 +116,7 @@ No network setup, end-to-end encrypted. Good for computers on another network.
 
 When the server supports it, the remote hosts page shows **Pair a computer by scanning**: sign in to DeepSeek in the app, tap **Scan** to open the system scanner, scan the code shown by the computer’s Remote plugin, check the computer fingerprint, then enter the verification code as prompted. The scanner is the system’s own page and uses the camera itself, so DSH Go asks for no camera permission; if the code is in a screenshot, pick it from photos inside that page. You can also copy the pairing link and tap **Paste pairing link**. If the system scanner can't open, the app tells you to paste the link instead.
 
-This version goes through the relay, end-to-end encrypted the whole way, not over LAN, P2P or TURN. Tap the route label on the connection card or beside a Host to see the actual route, connection time and available round-trip latency. Unmeasured values are not shown as zero.
+DSH Remote uses ArkWeb WebRTC to try a direct connection (LAN or P2P), then TURN. If WebRTC can't connect, it falls back to WebSocket Relay. All routes use end-to-end encryption. Tap the network label on the connection card or beside the host to see which route was confirmed, along with any measured latency or fallback reason.
 
 <!-- nav: commonSettings,commonRemoteHost,remoteCompactHistory -->
 `Settings › Remote host › Compact history`

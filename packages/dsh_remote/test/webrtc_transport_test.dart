@@ -69,6 +69,16 @@ void main() {
       expect(selectedPeerPath(const []), isNull);
     });
 
+    test('LAN signaling admits local IPv4, link-local/ULA IPv6 and mDNS host candidates', () {
+      for (final address in ['192.168.1.1', 'fd00::1', 'fe80::1', 'hidden.local']) {
+        expect(isLanHostCandidate('candidate:2 1 udp 1234 $address 40000 typ host'), isTrue);
+      }
+      for (final address in ['203.0.113.1', '2606:4700::1', '100.64.0.1', 'fd7a:115c:a1e0::1']) {
+        expect(isLanHostCandidate('candidate:2 1 udp 1234 $address 40000 typ host'), isFalse);
+      }
+      expect(isLanHostCandidate('candidate:2 1 udp 1234 192.168.1.1 40000 typ srflx'), isFalse);
+    });
+
     test('STUN-only keeps direct servers', () {
       final servers = stunOnlyIceServers(const [
         RemoteIceServer(['stun:stun.example:3478', 'turn:turn.example:3478'], username: 'u', credential: 'c'),

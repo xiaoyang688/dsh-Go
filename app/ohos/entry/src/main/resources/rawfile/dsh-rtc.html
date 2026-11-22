@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>DSH WebRTC</title>
+<script>
+'use strict';
+// Flutter owns authenticated signaling, Noise, and RTCH framing. Each message here
+// is one RTCDataChannel binary frame. Neither SDP nor frame data is executable.
+(() => {
+  const peers = new Map();
+  const emit = (id, type, fields) => dshRtcSink.event(JSON.stringify({id, type, ...fields}));
+
+  function close(id, reason) {
+    const peer = peers.get(id);
+    if (!peer) return;
+    peers.delete(id);
+    peer.pc.onconnectionstatechange = peer.pc.oniceconnectionstatechange = peer.pc.onicecandidate = null;
+    if (peer.dc) {
+      peer.dc.onopen = peer.dc.onmessage = peer.dc.onclose = peer.dc.onerror = null;
+      peer.dc.close();
+    }
+    peer.pc.close();
+    if (reason) emit(id, 'closed', {reason});
+  }
+
+  async function command(method, args) {
+    const id = args.id;
+    if (typeof id !== 'string' || !id) throw Error();
+    if (method === 'create') {
+      if (peers.has(id)) throw Error();
+      const pc = new RTCPeerConnection({iceServers: args.iceServers, iceTransportPolicy: args.iceTransportPolicy});
+      peers.set(id, {pc, dc: null});
+      pc.onicecandidate = ({candidate}) => {
+        if (candidate && candidate.candidate) emit(id, 'ice', {candidate: candidate.toJSON()});
+      };
+      pc.onconnectionstatechange = pc.oniceconnectionstatechange = () => {
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.iceConnectionState === 'failed') {
+          close(id, 'ICE connection closed');
+        }
+      };
+      return;
+    }
+    if (method === 'close') { close(id); return; }
+    const peer = peers.get(id);
+    if (!peer) throw Error();
+    const pc = peer.pc;
+    switch (method) {
+      case 'createOffer': {
+        const dc = peer.dc = pc.createDataChannel('dsh', {ordered: true});
+        dc.binaryType = 'arraybuffer';
+        dc.onopen = () => emit(id, 'open');
+        dc.onclose = dc.onerror = () => close(id, 'Data channel closed');
+        dc.onmessage = ({data}) => {
+          // RTCH sends 8 KiB chunks plus its 12-byte header.
+          if (!(data instanceof ArrayBuffer) || data.byteLength > 8204) { close(id, 'Invalid binary frame'); return; }
+          emit(id, 'message', {data: btoa(String.fromCharCode(...new Uint8Array(data)))});
+        };
+        await pc.setLocalDescription(await pc.createOffer());
+        return pc.localDescription.sdp;
+      }
+      case 'setAnswer': await pc.setRemoteDescription({type: 'answer', sdp: args.sdp}); return;
+      case 'addIceCandidate': await pc.addIceCandidate(args.candidate); return;
+      case 'send': peer.dc.send(Uint8Array.from(atob(args.data), c => c.charCodeAt(0))); return;
+      case 'stats': {
+        const reports = [];
+        (await pc.getStats()).forEach(r => {
+          if (['transport', 'candidate-pair', 'local-candidate', 'remote-candidate'].includes(r.type)) reports.push(r);
+        });
+        return JSON.stringify(reports);
+      }
+      default: throw Error();
+    }
+  }
+
+  window.dshRtcCommand = (ticket, method, json) => {
+    command(method, JSON.parse(json)).then(
+      value => dshRtcSink.complete(ticket, true, value ?? ''),
+      () => dshRtcSink.complete(ticket, false, '')
+    );
+  };
+  window.dshRtcCloseAll = () => { for (const id of peers.keys()) close(id); };
+})();
+</script>

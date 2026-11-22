@@ -1,4 +1,5 @@
 import PastePlugin from '../plugins/PastePlugin';
+import OhosWebRtcPlugin from '../plugins/OhosWebRtcPlugin';
 import AppLinksPlugin from '../plugins/AppLinksPlugin';
 import SecretsPlugin from '../plugins/SecretsPlugin';
 import AttachmentFilesPlugin from '../plugins/AttachmentFilesPlugin';
@@ -115,6 +116,7 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new AppLinksPlugin())
     super.configureFlutterEngine(flutterEngine)
     flutterEngine.getPlugins()?.add(new ConnectivityPlugin())
+    flutterEngine.getPlugins()?.add(new OhosWebRtcPlugin())
     GeneratedPluginRegistrant.registerWith(flutterEngine)
     flutterEngine.getPlugins()?.add(new SecretsPlugin())
     flutterEngine.getPlugins()?.add(new AttachmentFilesPlugin())

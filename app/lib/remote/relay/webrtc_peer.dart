@@ -5,6 +5,11 @@ import 'dart:typed_data';
 import 'package:dsh_remote/dsh_remote.dart' as remote;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'ohos_webrtc_peer.dart';
+
+remote.RemotePeerConnector peerConnectorFor(String operatingSystem) =>
+    operatingSystem == 'ohos' ? ohosPeerConnector : flutterPeerConnector;
+
 /// [remote.RemotePeerConnector] over flutter_webrtc (libwebrtc): the
 /// DataChannel that carries DSH Remote's direct path (LAN / P2P / TURN).
 /// Data only: no microphone or camera tracks. The native factory still creates

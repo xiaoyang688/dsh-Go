@@ -46,7 +46,8 @@ Future<void> _probe() async {
     secrets: _Secrets(),
     serverUrl: config['server'],
     deviceName: 'DSH Go P2P probe',
-    peerConnector: config['direct'] == false ? null : flutterPeerConnector,
+    peerConnector: config['direct'] == false ? null : peerConnectorFor(Platform.operatingSystem),
+    tryLanFirst: Platform.operatingSystem == 'ohos',
     onDirectFallback: (reason) => _log('automatic fallback: $reason'),
     controlTracer: (direction, frame) {
       final type = frame['type'];

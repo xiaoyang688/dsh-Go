@@ -20,7 +20,7 @@ import 'network_route.dart';
 /// changed key fails closed until [forgetHost].
 ///
 /// [direct] (直连优先) lets connections try LAN / P2P / TURN over
-/// [peerConnector] (flutter_webrtc) before the Server's relay.
+/// [peerConnector] before the Server's relay.
 class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayPairingBackend {
   DshRemoteRelayBackend({
     required SecretStore secrets,
@@ -29,6 +29,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
     remote.RemoteAccount? account,
     this.peerConnector,
     bool direct = true,
+    bool tryLanFirst = false,
     Future<RemoteNetworkRoute> Function()? resolveNetworkRoute,
     this._loadCompactHistory,
   }) : account =
@@ -43,6 +44,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
              },
              platform: 'dsh-app-android',
              clientVersion: clientVersion,
+             tryLanFirst: tryLanFirst,
              onDirectFallback: (_) => debugPrint('[dsh-remote] automatic transport fallback'),
            ) {
     this.direct = direct;
