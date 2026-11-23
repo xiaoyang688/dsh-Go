@@ -766,6 +766,11 @@ void main() {
       expect(initial.peerNetwork?.localIpVersion, RemoteIpVersion.ipv4);
       expect(initial.peerNetwork?.remoteIpVersion, RemoteIpVersion.ipv4);
       final framesBefore = server.clientControlFrames.length;
+      network.stats = pairStats('host', '192.168.1.20', 'srflx', '198.51.100.9');
+      final p2p = await session.inspectNetwork!();
+      expect(p2p.transportMode, RemoteTransportMode.p2p);
+      expect(session.networkDiagnostics, same(p2p));
+      expect(initial.transportMode, RemoteTransportMode.lan);
       network.stats = pairStats('host', '2001:db8::1', 'relay', '2001:db8::2');
       network.stats[0]['protocol'] = 'udp';
       network.stats[1]['protocol'] = 'udp';

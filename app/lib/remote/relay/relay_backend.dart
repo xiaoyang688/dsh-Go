@@ -355,6 +355,7 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
   /// progress steps; afterwards the client's own reconnects drive the status.
   void _onRelayState(RelayConnectionState state, HostLinkError? error) {
     _networkEpoch++;
+    _networkInspection = null;
     final opened = _client != null;
     switch (state) {
       case RelayConnectionState.connecting:
@@ -391,7 +392,7 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
     return HostLinkStatus(
       HostLinkPhase.connected,
       completed: HostLinkStep.values.toSet(),
-      path: backend.pathOf(client),
+      path: network == null ? backend.pathOf(client) : network.path,
       network: network,
     );
   }
@@ -401,10 +402,10 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
     final client = currentClient;
     final inspector = backend;
     if (_closed || client == null || inspector is! RelayNetworkBackend) return Future.value(null);
-    return _networkInspection ??= _inspectNetwork(
-      client,
-      inspector as RelayNetworkBackend,
-    ).whenComplete(() => _networkInspection = null);
+    final epoch = _networkEpoch;
+    return _networkInspection ??= _inspectNetwork(client, inspector as RelayNetworkBackend).whenComplete(() {
+      if (epoch == _networkEpoch) _networkInspection = null;
+    });
   }
 
   Future<RemoteNetworkStatus?> _inspectNetwork(DshClient client, RelayNetworkBackend inspector) async {
@@ -425,7 +426,10 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
     if (_status.phase == HostLinkPhase.connected) {
       // The tunnel's health check would notice a dead network only later.
       final client = _client;
-      if (client != null) unawaited(backend.probe(client).then((_) {}, onError: (_) {}));
+      if (client != null) {
+        unawaited(backend.probe(client).then((_) {}, onError: (_) {}));
+        if (_status.path != RelayPath.relay) unawaited(inspectNetwork());
+      }
     } else if (_status.phase == HostLinkPhase.reconnecting) {
       // Cut the wait short: our retry loop's, the relay client's own, or
       // connect afresh when that client is gone.

@@ -154,6 +154,22 @@ void main() {
     });
   }
 
+  testWidgets('connected host automatically replaces LAN when the selected pair moves to P2P', (tester) async {
+    final link = _InspectableLink(const HostLinkStatus(HostLinkPhase.connected, path: RelayPath.lan));
+    link.inspect = () async => const RemoteNetworkStatus(path: RelayPath.p2p);
+    await pump(tester, link, page: true);
+    expect(find.text('已连接 · ${RelayPath.lan.label} · 端到端加密'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await frames(tester);
+    expect(find.text('已连接 · ${RelayPath.p2p.label} · 端到端加密'), findsOneWidget);
+    expect(find.text(RelayPath.lan.label), findsNothing);
+    expect(find.byType(RemoteNetworkDetailsSheet), findsNothing);
+    link.emit(const HostLinkStatus(HostLinkPhase.reconnecting));
+    await tester.pump(const Duration(seconds: 5));
+    await frames(tester);
+    expect(link.inspections, 1);
+  });
+
   testWidgets('measurement is on demand and shows actual timing', (tester) async {
     final link = _InspectableLink(
       const HostLinkStatus(

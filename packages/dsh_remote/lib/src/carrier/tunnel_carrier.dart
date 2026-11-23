@@ -146,9 +146,11 @@ class RemoteHostSession {
     this.workspaceTypes,
     this.harnessVersion,
     this.transport = 'relay',
-    this.networkDiagnostics,
-    this.inspectNetwork,
-  });
+    RemoteNetworkDiagnostics? networkDiagnostics,
+    Future<RemoteNetworkDiagnostics> Function()? inspectNetwork,
+  }) : _networkDiagnostics = networkDiagnostics {
+    this.inspectNetwork = inspectNetwork == null ? null : () => _pendingInspection ??= _refresh(inspectNetwork);
+  }
 
   final RemoteRpcClient rpc;
 
@@ -160,12 +162,26 @@ class RemoteHostSession {
 
   /// Fresh authorized descriptor for this connection, never a cached listing.
   final String? harnessVersion;
+
+  /// Wire transport selected during negotiation. A WebRTC pair may migrate
+  /// after setup; use [networkDiagnostics] for the observed path.
   final String transport;
 
-  /// Initial payload-free snapshot; [inspectNetwork] refreshes native stats
-  /// on demand without sending a health probe or starting a polling timer.
-  final RemoteNetworkDiagnostics? networkDiagnostics;
-  final Future<RemoteNetworkDiagnostics> Function()? inspectNetwork;
+  /// Latest observation for this session, seeded at connection setup.
+  RemoteNetworkDiagnostics? get networkDiagnostics => _networkDiagnostics;
+  RemoteNetworkDiagnostics? _networkDiagnostics;
+  late final Future<RemoteNetworkDiagnostics> Function()? inspectNetwork;
+  Future<RemoteNetworkDiagnostics>? _pendingInspection;
+
+  Future<RemoteNetworkDiagnostics> _refresh(Future<RemoteNetworkDiagnostics> Function() inspect) async {
+    try {
+      final observation = await inspect();
+      if (!isClosed) _networkDiagnostics = observation;
+      return observation;
+    } finally {
+      _pendingInspection = null;
+    }
+  }
 
   bool get supportsTransfer => capabilities.contains('harness.remote.transfer.v1');
   bool get supportsStreamTransfer => capabilities.contains('harness.remote.stream.transfer.v1');

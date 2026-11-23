@@ -279,6 +279,16 @@ void _observeRemoteLink(Ref ref, HostLink link, HostKind kind) {
 final hostLinkStatusProvider = StreamProvider.autoDispose.family<HostLinkStatus, HostRef>((ref, host) {
   final link = ref.watch(hostLinkProvider(host));
   if (link == null) return Stream.value(HostLinkStatus.idle);
+  // ICE can switch candidate pairs without reconnecting or changing the OS
+  // interface. Read local stats while the UI is observing a WebRTC link.
+  if (link is NetworkInspectableHostLink) {
+    final timer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (link.status.isConnected && link.status.path != RelayPath.relay) {
+        unawaited((link as NetworkInspectableHostLink).inspectNetwork());
+      }
+    });
+    ref.onDispose(timer.cancel);
+  }
   return Stream<HostLinkStatus>.multi((out) {
     // Queue the snapshot and subscribe before a listener can act on it.
     out.add(link.status);

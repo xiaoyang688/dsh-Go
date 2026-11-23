@@ -9,7 +9,7 @@ import 'support/fake_relay.dart';
 
 class _Backend extends FakeRelayBackend implements RelayNetworkBackend {
   _Backend() : super(user: sampleRelayUser);
-  final pending = Completer<RemoteNetworkStatus?>();
+  var pending = Completer<RemoteNetworkStatus?>();
   int inspections = 0;
   RelayStateCallback? stateChanged;
   @override
@@ -61,14 +61,22 @@ void main() {
     final link = await open(backend);
     final client = link.currentClient;
     final result = link.inspectNetwork();
-    backend.pending.complete(
-      const RemoteNetworkStatus(path: RelayPath.turn, roundTripTime: Duration(milliseconds: 99)),
-    );
+    final old = backend.pending;
     backend.stateChanged!(RelayConnectionState.reconnecting, null);
+    expect(link.status.path, isNull);
     backend.stateChanged!(RelayConnectionState.connected, null);
+    backend.pending = Completer<RemoteNetworkStatus?>();
+    final fresh = link.inspectNetwork();
+    expect(backend.inspections, 2);
+    old.complete(const RemoteNetworkStatus(path: RelayPath.lan, roundTripTime: Duration(milliseconds: 99)));
     expect(await result, isNull);
     expect(link.currentClient, same(client));
     expect(link.status.network?.roundTripTime, isNull);
+    expect(link.inspectNetwork(), same(fresh));
+    const value = RemoteNetworkStatus(path: RelayPath.p2p, roundTripTime: Duration(milliseconds: 20));
+    backend.pending.complete(value);
+    expect(await fresh, same(value));
+    expect(link.status.network, same(value));
   });
 
   test('an inspection finishing after close cannot revive a connection', () async {

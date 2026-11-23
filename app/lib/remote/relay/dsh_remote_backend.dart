@@ -56,7 +56,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
 
   final remote.RemoteAccount account;
   final Future<bool> Function()? _loadCompactHistory;
-  final _loggedSessions = Expando<bool>('logged remote network');
+  final _loggedNetwork = Expando<RemoteNetworkStatus>('last logged remote path');
 
   /// The WebRTC stack [direct] connections use.
   final remote.RemotePeerConnector? peerConnector;
@@ -204,10 +204,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
     final snapshot = session?.networkDiagnostics;
     if (session == null || session.isClosed || snapshot == null) return null;
     final value = _network(snapshot);
-    if (_loggedSessions[session] != true) {
-      _loggedSessions[session] = true;
-      _logNetwork(value);
-    }
+    _logPathChange(session, value);
     return value;
   }
 
@@ -220,11 +217,14 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
     final snapshot = inspect == null ? session.networkDiagnostics : await inspect();
     if (carrier?.session != session || session.isClosed || snapshot == null) return null;
     final value = _network(snapshot);
-    _logNetwork(value);
+    _logPathChange(session, value);
     return value;
   }
 
-  static void _logNetwork(RemoteNetworkStatus value) {
+  void _logPathChange(remote.RemoteHostSession session, RemoteNetworkStatus value) {
+    final previous = _loggedNetwork[session];
+    if (previous != null && previous.path == value.path) return;
+    _loggedNetwork[session] = value;
     debugPrint(
       '[dsh-remote] transport=${value.path?.name ?? 'unknown'} '
       'setupMs=${value.connectDuration?.inMilliseconds ?? 'unknown'} '
