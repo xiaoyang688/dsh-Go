@@ -13,6 +13,7 @@ import 'hosts_state.dart';
 import 'image_snapshots.dart';
 import 'read_list_cache.dart';
 import 'read_list_identity.dart';
+import 'history_preview.dart';
 import 'sessions_state.dart';
 
 /// Test seam; production always uses the authenticated Host bridge, never
@@ -139,6 +140,7 @@ class SessionDeletionController extends Notifier<bool> {
     final backend = ref.read(sessionDeletionBackendProvider);
     final client = owner.connection.client;
     final identity = ref.read(readListIdentityProvider);
+    final previews = ref.read(historyPreviewCacheProvider);
     final snapshots = ref.read(imageSnapshotsProvider);
     final snapshotHost = imageSnapshotHost(owner.connection);
     state = true;
@@ -158,6 +160,7 @@ class SessionDeletionController extends Notifier<bool> {
         try {
           if (!owned()) break;
           await backend.delete(client, id);
+          previews?.forget(id);
           // Disk cleanup must not delay an acknowledged deletion or the next
           // item in the batch. It belongs to the captured Host, even if retired.
           unawaited(

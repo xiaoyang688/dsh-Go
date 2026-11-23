@@ -3743,6 +3743,9 @@ class L10nZh extends L10n {
   String get diagnosticsForAiFailed => '写不进去：本机运行时还没装好';
 
   @override
+  String get chatRecentPreview => '最近消息 · 只读预览';
+
+  @override
   String get chatBackgroundTaskNotice => '后台任务通知';
 
   @override

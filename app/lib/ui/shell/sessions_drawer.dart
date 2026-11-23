@@ -31,6 +31,7 @@ import '../common/app_sheet.dart';
 import '../common/empty_view.dart';
 import '../common/pressable.dart';
 import '../common/smooth_size.dart';
+import '../common/session_open_timing.dart';
 import '../common/read_list_status.dart';
 import '../common/status_dot.dart';
 import '../onboarding/local_install.dart';
@@ -511,6 +512,9 @@ class _SessionList extends ConsumerWidget {
             )
           : null,
       onOpen: (id) {
+        if (SessionOpenTiming.enabled) {
+          SessionOpenTiming.start(ref.read(currentSessionProvider) == id ? null : id);
+        }
         if (ref.read(readListIdentityProvider) != identity ||
             ref.read(drawerScopeProvider)?.sessions.any((s) => s.sessionId == id) != true) {
           return;

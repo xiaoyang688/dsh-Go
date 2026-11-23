@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../state/composer_quote.dart' show splitQuote;
 import '../../common/expand_reveal.dart';
+import '../../common/session_open_timing.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../media/generate_header.dart';
@@ -34,6 +35,7 @@ class UserBubble extends StatelessWidget {
   const UserBubble({
     super.key,
     required this.text,
+    this.timingSession,
     this.attachments,
     this.pendingLabel,
     this.pendingIcon = AppIcons.queued,
@@ -43,6 +45,7 @@ class UserBubble extends StatelessWidget {
   });
 
   final String text;
+  final String? timingSession;
 
   /// Images and file cards, shown right-aligned above the bubble (附件不塞进
   /// 气泡里)。
@@ -118,6 +121,9 @@ class UserBubble extends StatelessWidget {
     // Long-press selects in place. `@` references draw as chips; text with a
     // credential stays a plain SecretText.
     Widget content = ReferenceText(quote == null ? shown : body, style: style, interactive: interactive);
+    if (SessionOpenTiming.enabled && (quote == null ? shown : body).trim().isNotEmpty) {
+      content = SessionOpenTiming.body(timingSession, SessionBodySource.transcript, content);
+    }
     if (quote != null) {
       content = Column(
         mainAxisSize: MainAxisSize.min,

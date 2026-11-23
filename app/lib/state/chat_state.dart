@@ -12,6 +12,8 @@ import 'attachments.dart';
 import 'chat_error_text.dart';
 import 'connection_state.dart';
 import 'hosts_state.dart';
+import 'history_preview.dart';
+import 'read_list_identity.dart';
 import 'models_state.dart';
 import 'notify_state.dart' show appForegroundProvider;
 import 'run_pulse.dart';
@@ -267,6 +269,7 @@ class CommandNotice {
 class ChatState {
   const ChatState({
     this.items = const [],
+    this.preview = const [],
     this.running = false,
     this.streamLost = false,
     this.syncing = false,
@@ -295,6 +298,7 @@ class ChatState {
   });
 
   final List<ChatItem> items;
+  final List<HistoryPreviewLine> preview;
   final bool running;
 
   /// The live stream ended with an error; what is shown stays until the next
@@ -401,6 +405,7 @@ class ChatState {
     List<CommandNotice>? commands,
   }) => ChatState(
     items: items,
+    preview: preview,
     running: running,
     streamLost: streamLost ?? this.streamLost,
     syncing: syncing ?? this.syncing,
@@ -462,7 +467,8 @@ class ChatController extends Notifier<ChatState> {
   ChatController(this.sessionId);
 
   final String sessionId;
-  final ChatTranscript _transcript = ChatTranscript();
+  HistoryPreviewCache? _previewCache;
+  ChatTranscript _transcript = ChatTranscript();
   int? _usageTurn;
   String? _usageAttempt;
   void Function(UsageOutcome, {UsageOperation? actual})? _usageTurnEnd;
@@ -572,11 +578,22 @@ class ChatController extends Notifier<ChatState> {
     // rebuild may reuse this Notifier for an identically named session there.
     // Reconnecting to the same Host keeps the existing conversation consent.
     final host = ref.watch(activeHostProvider);
-    if (_approvalHost != host) {
-      // These requests belong to the previous Host, even if the new Host has
-      // the same session id. A new watch replays its own mux's pending requests.
-      // Retire only the local cards; do not answer or cancel the old Host's work.
-      _retireHostRequests();
+    final cache = ref.watch(historyPreviewCacheProvider);
+    if (_approvalHost != host || !identical(_previewCache, cache)) {
+      // A Notifier survives dependency rebuilds. Never let another scope
+      // inherit the live fold, queued prompts, command results or consent.
+      _transcript = ChatTranscript();
+      _pending = const [];
+      _commands.removeWhere((_, _) => true);
+      _model = null;
+      _unsettled = null;
+      _inboxSeen.clear();
+      _claimedAt.clear();
+      _withdrawn.clear();
+      _retryingFailed.clear();
+      _lookupKey = null;
+      _skew = null;
+      _previewCache = cache;
       _approvalHost = host;
       _defaultModelSaveFailed = false;
       _approvalScope = Object();
@@ -693,6 +710,7 @@ class ChatController extends Notifier<ChatState> {
   /// The loaded conversation without its live parts (running, approvals,
   /// questions), across a new or a lost connection.
   ChatState _retained({required bool loading}) => ChatState(
+    preview: _transcript.items.isEmpty ? _previewCache?.read(sessionId) ?? const [] : const [],
     items: _transcript.items,
     title: _transcript.title,
     turns: _transcript.turns,
@@ -813,6 +831,8 @@ class ChatController extends Notifier<ChatState> {
         .watch(
           sessionId,
           options: WatchOptions(
+            maxMessages: _sameClock ? 500 : WatchOptions.firstScreenMaxMessages,
+            turnWindow: _sameClock ? const TurnWindow(50, 2) : WatchOptions.firstScreenTurnWindow,
             assistantStream: !_quiet,
             includeSyncEvents: true,
             activate: true,
@@ -908,10 +928,13 @@ class ChatController extends Notifier<ChatState> {
               _snapshotGeneration = client.mux.generation;
               _synchronized = true;
               // One publication: no ready state containing the old inbox.
+              _rememberPreview(client);
               _publish(freshSnapshot: true);
               if (!_syncReady.isCompleted) _syncReady.complete(true);
               _activateInteraction();
             } else if (changed) {
+              if (_canControl && (event is AssistantMessageEvent || event is UserMessageEvent))
+                _rememberPreview(client);
               _schedule();
             }
           },
@@ -922,6 +945,8 @@ class ChatController extends Notifier<ChatState> {
             if (!_syncReady.isCompleted) _syncReady.complete(false);
             // Deleted elsewhere: back to a new chat, nothing to report.
             if (e is DshRemoteException && e.code == 'session/not-found') {
+              _previewCache?.forget(sessionId);
+              state = const ChatState(syncing: true, loading: false);
               if (ref.read(currentSessionProvider) == sessionId) {
                 ref.read(currentSessionProvider.notifier).select(null);
               }
@@ -1170,6 +1195,13 @@ class ChatController extends Notifier<ChatState> {
     });
   }
 
+  void _rememberPreview(DshClient client) {
+    final cache = _previewCache;
+    if (cache == null || !identical(cache, ref.read(historyPreviewCacheProvider))) return;
+    final connection = readListConnection(ref.read(activeConnectionProvider), ref.read(activeHostProvider));
+    if (identical(connection?.client, client)) cache.remember(sessionId, _transcript.items);
+  }
+
   void _publish({bool freshSnapshot = false}) {
     _dirty = false;
     _moving.removeWhere((_, operation) => !_currentOperation(operation));
@@ -1213,6 +1245,7 @@ class ChatController extends Notifier<ChatState> {
     final pending = _placePending();
     state = ChatState(
       items: items,
+      preview: freshSnapshot ? const [] : state.preview,
       running: running,
       streamLost: freshSnapshot ? false : state.streamLost,
       syncing: !_canControl,
@@ -1780,6 +1813,7 @@ class ChatController extends Notifier<ChatState> {
     void done() {
       if (!settled.isCompleted) settled.complete();
     }
+
     final unlisten = listenSelf((_, next) {
       if (!next.stopping) done();
     });
@@ -2068,6 +2102,7 @@ class ChatController extends Notifier<ChatState> {
       _model = previous;
       state = ChatState(
         items: state.items,
+        preview: state.preview,
         running: state.running,
         streamLost: state.streamLost,
         syncing: state.syncing,

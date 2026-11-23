@@ -65,6 +65,7 @@ import '../common/brief_notice.dart';
 import '../common/fluid_bits.dart';
 import '../common/ui_trace.dart';
 import '../common/sheet_title_bar.dart';
+import '../common/session_open_timing.dart';
 import '../common/smooth_size.dart';
 import '../common/status_dot.dart';
 import '../features/all_features_page.dart';
@@ -1647,7 +1648,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     // start back into the last one, auto start off): the empty page with its
     // one fix rather than a blank list.
     final idleBlank =
-        idle != null && sessionId != null && ref.watch(chatProvider(sessionId).select((s) => s.items.isEmpty));
+        idle != null &&
+        sessionId != null &&
+        ref.watch(chatProvider(sessionId).select((s) => s.items.isEmpty && s.preview.isEmpty));
 
     // 只盯顶栏 / 输入条需要的几个字段:流式增量不重建整页。
     final chat = sessionId == null
@@ -1656,6 +1659,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
             chatProvider(sessionId).select(
               (s) => (
                 title: s.title,
+                preview: s.preview,
                 running: s.running,
                 stopping: s.stopping,
                 streamLost: s.streamLost,
@@ -1892,6 +1896,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                 ),
                               ),
                             ),
+                          )
+                        : chat!.preview.isNotEmpty
+                        ? ListView(
+                            padding: EdgeInsets.fromLTRB(20, headerHeight + 8, 20, _ChatLayout.overlap + 8),
+                            children: [
+                              Text(l10n.chatRecentPreview, style: Theme.of(context).textTheme.labelMedium),
+                              for (final line in chat.preview)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Align(
+                                    alignment: line.user ? Alignment.centerRight : Alignment.centerLeft,
+                                    child: SessionOpenTiming.body(
+                                      sessionId,
+                                      SessionBodySource.preview,
+                                      Text(line.text),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           )
                         : _ChatTextScale(
                             child: MediaCardActions(

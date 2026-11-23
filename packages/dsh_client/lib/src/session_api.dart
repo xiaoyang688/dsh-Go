@@ -73,6 +73,12 @@ class WatchOptions {
     this.hostRequestGrace = const Duration(seconds: 3),
   });
 
+  /// Remote chat opens at the latest turn when it fits, and pages back on
+  /// demand. The Host counts append-surface user and assistant messages;
+  /// tool records and the projection baseline do not consume this budget.
+  static const firstScreenTurnWindow = TurnWindow(2, 1);
+  static const firstScreenMaxMessages = 8;
+
   /// Request activation on a confirmed compatible Host. Passive readers keep
   /// this false. Unknown releases and carriers without release evidence omit it.
   final bool activate;

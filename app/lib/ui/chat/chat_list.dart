@@ -1252,6 +1252,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
         : null;
     final message = AssistantMessage(
       item: item,
+      timingSession: widget.sessionId,
       showActions: showActions,
       onBranch: branchable ? () => _branch(item) : null,
       branching: _forkingId == item.id,
@@ -1481,6 +1482,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     return switch (row) {
       UserRow(:final item) when dshUiReplyChip(item.text) != null => DshUiReplyChip(label: dshUiReplyChip(item.text)!),
       UserRow(:final item) => UserBubble(
+        timingSession: widget.sessionId,
         text: withoutAppNotes(item.text),
         attachments: item.images.isEmpty && item.files.isEmpty
             ? null

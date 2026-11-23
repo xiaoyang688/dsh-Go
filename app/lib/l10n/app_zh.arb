@@ -2288,6 +2288,7 @@
   "diagnosticsForAiHint": "把环境快照写进引擎，AI 自己读",
   "diagnosticsForAiDone": "已写入诊断，问 AI「看下诊断」就行",
   "diagnosticsForAiFailed": "写不进去：本机运行时还没装好",
+  "chatRecentPreview": "最近消息 · 只读预览",
   "chatBackgroundTaskNotice": "后台任务通知",
   "chatBackgroundTaskMessage": "后台任务消息",
   "chatDeclineQuestion": "不回答",

@@ -6944,6 +6944,12 @@ abstract class L10n {
   /// **'写不进去：本机运行时还没装好'**
   String get diagnosticsForAiFailed;
 
+  /// No description provided for @chatRecentPreview.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近消息 · 只读预览'**
+  String get chatRecentPreview;
+
   /// No description provided for @chatBackgroundTaskNotice.
   ///
   /// In zh, this message translates to:

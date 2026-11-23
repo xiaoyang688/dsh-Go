@@ -3940,6 +3940,9 @@ class L10nEn extends L10n {
   String get diagnosticsForAiFailed => 'Not written: the local runtime is not installed';
 
   @override
+  String get chatRecentPreview => 'Recent messages · Read-only preview';
+
+  @override
   String get chatBackgroundTaskNotice => 'Background task notice';
 
   @override

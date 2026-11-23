@@ -197,6 +197,66 @@ void main() {
     final eventFrames = frames.where((f) => f['type'] == 'event').toList();
     Map<String, Object?> eventFrame(int seq) => eventFrames.firstWhere((f) => (f['event'] as Map)['seq'] == seq);
 
+    test('a bounded opening publishes immediately and pages from the first loaded record', () async {
+      final sessionId = (snapshot['header'] as Map)['id'] as String;
+      host.onOpen = (socket, id, endpoint, payload) {
+        final request = (payload['args'] as Map)['request'] as Map;
+        expect(request['maxMessages'], 8);
+        expect(request['turnWindow'], {'minMessages': 2, 'minTurns': 1});
+        socket.item(id, {
+          ...snapshot,
+          'cursor': 17,
+          'projections': {
+            'asOfSeq': 17,
+            'values': {
+              'subagentTiming': {
+                'active': {'since': 1000, 'through': 2000},
+              },
+            },
+          },
+          'records': [for (var i = 15; i <= 17; i++) eventFrame(i)],
+          'hasMore': true,
+        });
+      };
+      final client = await connect();
+      addTearDown(client.close);
+      final opening = await client
+          .watch(
+            sessionId,
+            options: const WatchOptions(
+              maxMessages: WatchOptions.firstScreenMaxMessages,
+              turnWindow: WatchOptions.firstScreenTurnWindow,
+            ),
+          )
+          .where((event) => event is SessionSnapshotEvent)
+          .cast<SessionSnapshotEvent>()
+          .first;
+      final transcript = ChatTranscript()..apply(opening);
+      expect(transcript.oldestSeq, 15);
+      expect(transcript.hasMoreHistory, isTrue);
+      expect(transcript.running, isTrue);
+      expect(host.requests.where((r) => r['path'] == '/api/session/page'), isEmpty);
+      host.handlers['session/page'] = (args) {
+        final request = args['request'] as Map;
+        expect(request['beforeSeq'], 15);
+        expect(request['throughSeq'], 17);
+        return {
+          'ok': true,
+          'value': {
+            'records': [...snapshot['records'] as List, for (var i = 5; i < 15; i++) eventFrame(i)],
+            'hasMore': false,
+          },
+        };
+      };
+      transcript.prependHistory(
+        await client.history(sessionId, throughSeq: transcript.cursor, beforeSeq: transcript.oldestSeq),
+      );
+      expect(transcript.events.map((e) => e.seq), List.generate(18, (i) => i));
+      transcript.apply(SessionLogEvent.fromJson(eventFrame(18)['event']));
+      expect(transcript.running, isFalse);
+      expect(transcript.hasMoreHistory, isFalse);
+    });
+
     test('a transient history 500 is repaired by the next follow without exposing an error', () async {
       final sessionId = (snapshot['header'] as Map)['id'] as String;
       var opens = 0;

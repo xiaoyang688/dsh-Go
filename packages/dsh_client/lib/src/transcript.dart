@@ -8,6 +8,7 @@ library;
 
 import 'dart:collection';
 
+import 'agents_api.dart';
 import 'goals_api.dart';
 import 'json.dart';
 import 'models.dart';
@@ -318,7 +319,11 @@ class ChatTranscript {
         cursor = event.cursor;
         if (!event.isResync) hasMoreHistory = event.hasMore;
         _drafts.clear();
-        _runningOverride = null;
+        // A capped snapshot can begin in the middle of the running turn,
+        // before paging has recovered its turn/start. Use the Host's timing
+        // projection at this snapshot cut when present.
+        final timing = event.hasMore ? projections.subagentTiming : null;
+        _runningOverride = timing == null ? null : timing.activeSince != null;
         for (final e in event.events) {
           _log[e.seq] = e;
         }

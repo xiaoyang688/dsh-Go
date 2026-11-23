@@ -12,6 +12,7 @@ import '../../../l10n/l10n.dart';
 import '../../../speech/read_aloud.dart';
 import '../../speech/speech_ui.dart';
 import '../../common/expand_reveal.dart';
+import '../../common/session_open_timing.dart';
 import '../../common/typing_indicator.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -50,6 +51,7 @@ class AssistantMessage extends StatefulWidget {
   const AssistantMessage({
     super.key,
     required this.item,
+    this.timingSession,
     this.showActions = false,
     this.onBranch,
     this.branching = false,
@@ -60,6 +62,7 @@ class AssistantMessage extends StatefulWidget {
   });
 
   final AssistantChatItem item;
+  final String? timingSession;
 
   /// 是否在正文下方显示复制等操作(只给一轮里最后一条助手正文)。
   final bool showActions;
@@ -252,6 +255,7 @@ class _AssistantMessageState extends State<AssistantMessage> {
   }
 
   Widget _wrapAssistantBody(BuildContext context, Widget child) {
+    child = SessionOpenTiming.body(widget.timingSession, SessionBodySource.transcript, child);
     final themeStyle = DshThemeStyle.of(context);
     if (themeStyle.pack == null) return child;
     final scheme = Theme.of(context).colorScheme;
