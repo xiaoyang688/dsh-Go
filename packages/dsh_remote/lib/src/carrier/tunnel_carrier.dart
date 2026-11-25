@@ -18,9 +18,8 @@ import '../state.dart';
 import '../transport/transport.dart';
 import '../util/bytes.dart';
 
-/// Fixed endpoint allow-list of the Host plugin (ds-harness-remote 0.5.17 to 0.6.0,
-/// `HARNESS_REMOTE_ALLOWLIST` + terminal endpoints). Everything else is
-/// refused by the Host; this client refuses it locally first.
+/// Exact endpoints that the tunnel can forward. DS Bot additionally requires
+/// the authenticated session's `ds-bot.remote.v1` capability.
 const Set<String> harnessRemoteAllowlist = {
   r'$events',
   r'$events/result',
@@ -33,6 +32,8 @@ const Set<String> harnessRemoteAllowlist = {
   'credentials/set',
   'credentials/unset',
   'directoryPicker/list',
+  DsBotRpcTransport.callEndpoint,
+  DsBotRpcTransport.feedEndpoint,
   'fileReferences/list',
   'goals/clear',
   'goals/complete',
@@ -212,7 +213,81 @@ typedef RemoteSessionOpener = Future<RemoteHostSession> Function(RemoteFailure? 
 ///   `harness.remote.transfer.v1`), single messages are capped at 4 MiB;
 /// * Host / tunnel refusals (`METHOD_NOT_ALLOWED`, `RPC_TIMEOUT`,
 ///   `RATE_LIMITED`, ...) surface as `{ok: false}` [DshRemoteException]s.
-class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
+class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier, DsBotUnaryCarrier {
+  // Intersection of the installed 0.6.7 route allowlist and ordinary mobile
+  // Bot operations. File reads, pairing, credentials and computer controls
+  // stay outside this client route.
+  static const _botFields = <String, Set<String>>{
+    'answer-question': {'sessionId', 'questionId', 'answer'},
+    'approval-answer': {'id', 'choice'},
+    'avatar': {'botId'},
+    'chat': {'botId', 'cursor'},
+    'create-bot': {'name', 'role', 'instructions', 'color', 'model', 'effort', 'brief'},
+    'create-room': {'members', 'name', 'admin', 'greet'},
+    'delete-bot': {'id'},
+    'delete-room': {'id'},
+    'dismiss-question': {'sessionId'},
+    'dismiss-view': {'sessionId'},
+    'duplicate-bot': {'id'},
+    'folders': {},
+    'goal-control': {'roomId', 'goalId', 'action', 'stopWork'},
+    'goal-draft': {'roomId', 'text'},
+    'hello': {'client', 'api'},
+    'image': {'sessionId', 'attachmentId', 'preview'},
+    'memory-add': {'botId', 'roomId', 'scope', 'text'},
+    'memory-edit': {'botId', 'roomId', 'scope', 'topic', 'text', 'next'},
+    'memory-forget': {'botId', 'roomId', 'scope', 'topic', 'text'},
+    'memory-view': {'botId', 'roomId'},
+    'notices': {'boot', 'since'},
+    'room-chat': {'roomId', 'cursor'},
+    'send': {'sessionId', 'text', 'images'},
+    'stage-image': {'mediaType', 'data'},
+    'set-main': {'id', 'main'},
+    'state': {'since', 'models', 'locale', 'avatars'},
+    'stop-member-work': {'roomId', 'botId'},
+    'update-bot': {'id', 'name', 'role', 'instructions', 'color', 'model', 'effort', 'workDir'},
+    'update-room': {'id', 'name', 'notice', 'mode', 'admin', 'add', 'remove', 'workDir'},
+    'usage-summary': {'botId', 'timeZone'},
+    'view-reply': {'sessionId', 'viewId', 'action', 'values'},
+  };
+
+  static bool _allowsBotOperation(String endpoint, Map<String, Object?> payload) {
+    if (endpoint == 'set-prefs') {
+      return payload.length == 1 && DsBotGoLayout.parse(payload['goLayout'], exact: true) != null;
+    }
+    final fields = _botFields[endpoint];
+    return fields != null && payload.keys.every(fields.contains);
+  }
+
+  static bool _allowsBotRequest(Map<String, Object?> args) {
+    final operation = args['endpoint'];
+    final payload = asMap(args['payload']);
+    return args.length == 2 && operation is String && payload != null && _allowsBotOperation(operation, payload);
+  }
+
+  @override
+  DsBotUnaryTransport? openDsBotUnaryTransport() {
+    final session = _session;
+    if (session == null || session.isClosed || !session.capabilities.contains('plugin.route.v1')) return null;
+    return DsBotUnaryTransport((endpoint, payload, timeout) async {
+      if (!_allowsBotOperation(endpoint, payload)) {
+        throw const DshRemoteException('METHOD_NOT_ALLOWED', 'This Bot operation is unavailable over the route.');
+      }
+      // An old page must not send into a newer authenticated connection.
+      if (!identical(_session, session) || session.isClosed) {
+        throw const DshTransportException('The DS Bot tunnel connection ended.');
+      }
+      try {
+        return await session.rpc.call('plugin.route.call', {
+          'route': 'api/bot',
+          'body': {'endpoint': endpoint, 'payload': payload},
+        }, timeout: timeout ?? callTimeout);
+      } on RemoteRpcException catch (error) {
+        throw (_foldRpcFailure('api/bot', error) as RpcError).error;
+      }
+    });
+  }
+
   RemoteTunnelCarrier({
     required this.hostId,
     required RemoteSessionOpener open,
@@ -261,7 +336,14 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
   bool get supportsUplink => false;
 
   @override
-  bool allowsEndpoint(String endpoint) => harnessRemoteAllowlist.contains(endpoint);
+  bool allowsEndpoint(String endpoint) => _allowsEndpoint(endpoint, _session);
+
+  bool _allowsEndpoint(String endpoint, RemoteHostSession? session) {
+    if (endpoint == DsBotRpcTransport.callEndpoint || endpoint == DsBotRpcTransport.feedEndpoint) {
+      return !_closed && session?.isClosed == false && session!.capabilities.contains('ds-bot.remote.v1');
+    }
+    return harnessRemoteAllowlist.contains(endpoint);
+  }
 
   @override
   bool get supportsWorkspaceUpload =>
@@ -465,14 +547,13 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
 
   @override
   Future<RpcResult> call(String endpoint, Map<String, Object?> args, {Duration? timeout}) async {
-    if (!allowsEndpoint(endpoint)) {
-      return RpcError(
-        DshRemoteException('METHOD_NOT_ALLOWED', 'The endpoint $endpoint is not available over ds-harness-remote.', {
-          'endpoint': endpoint,
-        }),
-      );
+    if (!allowsEndpoint(endpoint)) return _refusedEndpoint(endpoint);
+    if (endpoint == DsBotRpcTransport.feedEndpoint ||
+        (endpoint == DsBotRpcTransport.callEndpoint && !_allowsBotRequest(args))) {
+      return _refusedEndpoint(endpoint);
     }
     final session = await _ensureSession();
+    if (!_allowsEndpoint(endpoint, session)) return _refusedEndpoint(endpoint);
     final request = <String, Object?>{
       'endpoint': endpoint,
       'payload': {'args': args},
@@ -491,6 +572,7 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
           // transfer retry would execute it again, not retrieve its result.
           if (error.isLocal ||
               error.code != 'RESPONSE_TOO_LARGE' ||
+              endpoint == DsBotRpcTransport.callEndpoint ||
               endpoint == 'commands/execute' ||
               endpoint == 'settings/mutate' ||
               endpoint == 'settings/update' ||
@@ -509,6 +591,12 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
     _tracer?.call(DshTraceEntry('in', 'rpc', {'endpoint': endpoint, 'body': response}));
     return result;
   }
+
+  RpcError _refusedEndpoint(String endpoint) => RpcError(
+    DshRemoteException('METHOD_NOT_ALLOWED', 'The endpoint $endpoint is not available over ds-harness-remote.', {
+      'endpoint': endpoint,
+    }),
+  );
 
   /// Host refusals become `{ok: false}`; local deadline/loss become
   /// [DshTransportException] (the call's outcome is unknown: do not blindly
@@ -959,7 +1047,9 @@ class _TunnelLink implements DshMuxLink {
   @override
   void open(String streamId, String endpoint, Map<String, Object?> payload) {
     if (_closed) return;
-    if (!_carrier.allowsEndpoint(endpoint)) {
+    if (!_carrier._allowsEndpoint(endpoint, _session) ||
+        endpoint == DsBotRpcTransport.callEndpoint ||
+        (endpoint == DsBotRpcTransport.feedEndpoint && asMap(payload['args'])?.isEmpty != true)) {
       scheduleMicrotask(
         () => _emit({
           'type': 'error',

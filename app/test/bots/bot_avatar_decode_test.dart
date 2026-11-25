@@ -2,9 +2,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dsh_app/state/bots_state.dart';
-import 'package:dsh_app/ui/fx/bot_avatar/bot_avatar.dart' as fx;
 import 'package:dsh_app/ui/bots/bot_avatar.dart';
-import 'package:dsh_app/ui/common/status_dot.dart';
+import 'package:dsh_app/ui/bots/bot_character.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -111,7 +110,7 @@ void main() {
     _view(tester, 2);
     await _mount(tester, null);
     expect(find.byType(Image), findsNothing);
-    expect(find.byType(fx.BotAvatar), findsOneWidget);
+    expect(find.byType(BotCharacter), findsOneWidget);
     expect(find.byType(BotMonogram), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -123,8 +122,17 @@ void main() {
     final context = tester.element(find.byType(Image));
     await tester.runAsync(() => precacheImage(image.image, context, onError: (_, _) {}));
     await pumpFrames(tester, 2);
-    expect(find.byType(fx.BotAvatar), findsOneWidget);
-    expect(find.byType(StatusDot), findsOneWidget);
+    expect(find.byType(BotCharacter), findsOneWidget);
+    final workingBadge = find.descendant(
+      of: find.byType(BotAvatar),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is DecoratedBox &&
+            widget.decoration is BoxDecoration &&
+            (widget.decoration as BoxDecoration).color == const Color(0xff10b981),
+      ),
+    );
+    expect(workingBadge, findsOneWidget);
     expect(tester.getSize(find.byType(BotAvatar)), const Size.square(40));
     expect(tester.takeException(), isNull);
   });

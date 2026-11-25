@@ -184,6 +184,38 @@ void main() {
     expect(find.text('信任这台主机？'), findsOneWidget);
   });
 
+  testWidgets('host HTTPS settings save and remove a link without displaying the stored credential', (tester) async {
+    await pump(tester, const RemoteScreen());
+    await frames(tester);
+    Future<void> open() async {
+      await tester.tap(find.byTooltip(appL10n.remoteHttpsLine));
+      await frames(tester);
+    }
+
+    await open();
+    expect(find.text(appL10n.remoteHttpsUnconfigured), findsOneWidget);
+    final field = find.byType(TextField);
+    final save = find.widgetWithText(FilledButton, appL10n.commonSave);
+    await tester.enterText(field, 'http://host.example/dsh/?token=synthetic');
+    await tester.tap(save);
+    await frames(tester);
+    expect(find.text(appL10n.remoteHttpsInvalidUrl), findsOneWidget);
+    expect(secrets.values, isEmpty);
+
+    const url = 'https://host.example/dsh/?token=synthetic';
+    expect(tester.widget<TextField>(field).obscureText, isTrue);
+    await tester.enterText(field, url);
+    await tester.tap(save);
+    await frames(tester);
+    expect(secrets.values.values, [url]);
+    await open();
+    expect(find.text(appL10n.remoteHttpsConfigured), findsOneWidget);
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    await tester.tap(find.text(appL10n.remoteHttpsClear));
+    await frames(tester);
+    expect(secrets.values, isEmpty);
+  });
+
   testWidgets('host switcher exposes the active row as selected', (tester) async {
     final semantics = tester.ensureSemantics();
     await pump(tester, const _Launcher());

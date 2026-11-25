@@ -11,36 +11,13 @@ import '../../state/notify_state.dart';
 import 'bot_chat_page.dart';
 import 'room_chat_page.dart';
 
-/// Draws nothing. Placed in the shell, it keeps the DS Bot connection and its
-/// inbox alive so notices become notifications, and reconnects the feed when
-/// the app comes back.
-class BotAlertsHost extends ConsumerStatefulWidget {
+/// Keeps the inbox alive so notices become notifications. The controller
+/// observes the app foreground flag already maintained by the shell.
+class BotAlertsHost extends ConsumerWidget {
   const BotAlertsHost({super.key});
 
   @override
-  ConsumerState<BotAlertsHost> createState() => _BotAlertsHostState();
-}
-
-class _BotAlertsHostState extends ConsumerState<BotAlertsHost> with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) ref.read(dsBotProvider.notifier).kick();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dsBotInboxProvider.select((_) => null));
     return const SizedBox.shrink();
   }

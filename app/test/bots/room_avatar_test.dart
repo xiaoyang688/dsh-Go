@@ -1,46 +1,76 @@
 import 'package:dsh_app/ui/bots/bot_avatar.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../chat/support/harness.dart' show loadTestFonts;
-import '../shell/golden_harness.dart' show goldenApp;
-import 'support.dart';
-
 void main() {
-  setUpAll(loadTestFonts);
+  final team = DsBotTeam.fromJson({
+    'bots': [
+      for (var i = 1; i <= 6; i++) {'id': 'b$i', 'name': 'Bot $i'},
+    ],
+  });
+
   for (final size in [32.0, 40.0, 56.0, 64.0]) {
-    testWidgets('stacked avatars leave the rear letter clear at $size', (tester) async {
-      final team = DsBotTeam.fromJson(sampleTeam(working: false));
-      await tester.pumpWidget(
-        goldenApp(
-          brightness: Brightness.light,
-          home: Scaffold(
-            body: Center(
-              child: RoomAvatar(room: team.room('r1')!, team: team, size: size),
+    for (final count in [1, 2, 3, 4, 6]) {
+      testWidgets('$count members fit the $size group portrait', (tester) async {
+        final room = DsBotRoom(
+          id: 'room',
+          name: 'Room',
+          members: [for (var i = 1; i <= count; i++) 'b$i'],
+          admin: 'b$count',
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Center(
+                child: RoomAvatar(room: room, team: team, size: size),
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pump();
-      final tile = tester.getRect(find.byType(RoomAvatar));
-      final faces = find.byType(BotAvatar);
-      final back = tester.getRect(faces.first);
-      final front = tester.getRect(faces.last);
-      final glyph = tester.getRect(find.text('C'));
-      final gap = (size * .05).clamp(1.5, 3.0);
-      for (final point in [glyph.topLeft, glyph.topRight, glyph.bottomLeft, glyph.bottomRight]) {
-        expect((point - front.center).distance, greaterThan(front.width / 2 + gap + .5));
-      }
-      expect(back.width, closeTo(size * .6, .01));
-      expect(back.height, closeTo(size * .6, .01));
-      expect(front.size, back.size);
-      expect(back.left, tile.left);
-      expect(back.top, tile.top);
-      expect(front.right, tile.right);
-      expect(front.bottom, tile.bottom);
-      expect(back.center.dx + front.center.dx, closeTo(tile.center.dx * 2, .5));
-      expect(back.center.dy + front.center.dy, closeTo(tile.center.dy * 2, .5));
-    });
+        );
+        final tile = tester.getRect(find.byType(RoomAvatar));
+        final faces = find.byType(BotAvatar);
+        final shown = count > 4 ? 3 : count;
+        expect(tester.widgetList<BotAvatar>(faces).map((face) => face.bot.id), [
+          for (var i = 1; i <= shown; i++) 'b$i',
+        ]);
+        for (var i = 0; i < shown; i++) {
+          final face = tester.getRect(faces.at(i));
+          expect(
+            face.width,
+            closeTo(
+              size *
+                  (count < 3
+                      ? 2 / 3
+                      : count == 3
+                      ? 5 / 9
+                      : .5),
+              .001,
+            ),
+          );
+          expect(face.left, greaterThanOrEqualTo(tile.left));
+          expect(face.right, lessThanOrEqualTo(tile.right + .001));
+          expect(face.top, greaterThanOrEqualTo(tile.top));
+          expect(face.bottom, lessThanOrEqualTo(tile.bottom + .001));
+        }
+        expect(find.text('+3'), count == 6 ? findsOneWidget : findsNothing);
+      });
+    }
   }
+
+  testWidgets('unknown and duplicate IDs do not consume portrait seats', (tester) async {
+    const room = DsBotRoom(id: 'room', name: 'Room', members: ['unknown', 'b1', 'b1', 'b2']);
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Center(
+            child: RoomAvatar(room: room, team: team),
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(BotAvatar), findsNWidgets(2));
+    expect(find.textContaining('+'), findsNothing);
+  });
 }

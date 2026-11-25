@@ -124,6 +124,20 @@ void main() {
   });
 
   group('calls', () {
+    test('the published engine identifies a local agent Bot', () {
+      expect(DsBot.fromJson({'id': 'native'}).engine, isNull);
+      expect(DsBot.fromJson({'id': 'local', 'engine': 'codex'}).engine, 'codex');
+    });
+
+    test('a skill token rides the existing Bot send endpoint as literal text', () async {
+      host.handlers['send'] = (_) => true;
+      await api.send('bot-id', '/release-notes for the new version');
+      expect(host.calls.single, {
+        'endpoint': 'send',
+        'payload': {'sessionId': 'bot-id', 'text': '/release-notes for the new version'},
+      });
+    });
+
     test('a call posts the endpoint and payload with the cookie and Host, and returns the value', () async {
       host.handlers['hello'] = (payload) {
         expect(payload['api'], [1]);
@@ -256,6 +270,30 @@ void main() {
       expect(quiet.live.bots['m1']!.note, 'Run the tests');
       expect(quiet.live.rooms['r1']!.single.speaking, isTrue);
       expect(quiet.live.approvals.single.answerable, isTrue);
+    });
+
+    test('parses optional history image refs and reads bytes over the authenticated route', () async {
+      final item = DsBotItem.fromJson({
+        'kind': 'bot',
+        'sessionId': 'earlier',
+        'imageRefs': [
+          {'attachmentId': 'a1', 'mime': 'image/png', 'name': 'chart.png'},
+          {'attachmentId': ''},
+          false,
+        ],
+      });
+      expect(item.sessionId, 'earlier');
+      final image = item.imageRefs.single;
+      expect((image.attachmentId, image.mime, image.name), ('a1', 'image/png', 'chart.png'));
+      expect(DsBotItem.fromJson({'kind': 'user', 'images': 1}).imageRefs, isEmpty);
+      host.handlers['image'] = (_) => {'mime': 'image/png', 'data': 'AQID'};
+      expect(await api.image(item.sessionId!, image.attachmentId), [1, 2, 3]);
+      expect(host.calls.single, {
+        'endpoint': 'image',
+        'payload': {'sessionId': 'earlier', 'attachmentId': 'a1'},
+      });
+      host.handlers['image'] = (_) => {'mime': 'image/png', 'data': 'invalid.'};
+      await expectLater(api.image('earlier', 'a1'), throwsA(isA<DshProtocolException>()));
     });
 
     test('pages, notices, memory and usage parse what the host sends', () async {

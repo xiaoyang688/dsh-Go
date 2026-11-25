@@ -3,7 +3,9 @@
 // the new Bot form and the new group sheet create, memory is edited in place,
 // a member's work is stopped.
 
+import 'package:dsh_app/state/drawer_view_state.dart';
 import 'package:dsh_app/state/models_state.dart';
+import 'package:dsh_app/state/workspaces_state.dart';
 import 'package:dsh_app/ui/bots/bot_chat_page.dart';
 import 'package:dsh_app/ui/bots/bot_details_page.dart';
 import 'package:dsh_app/ui/bots/bots_page.dart';
@@ -13,16 +15,20 @@ import 'package:dsh_app/ui/bots/new_room_sheet.dart';
 import 'package:dsh_app/ui/bots/room_chat_page.dart';
 import 'package:dsh_app/ui/bots/room_details_page.dart';
 import 'package:dsh_app/ui/chat/dsh_ui/dsh_ui.dart';
+import 'package:dsh_app/ui/shell/drawer/drawer_filter_bar.dart';
 import 'package:dsh_app/ui/shell/page_frame.dart';
+import 'package:dsh_app/ui/shell/sessions_drawer.dart' as shell;
 import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../chat/support/harness.dart';
 import '../shell/golden_harness.dart' show goldenApp;
+import '../workspace/support.dart' show FakeWorkspaceHost, FixedWorkspacePrefs, workspaceHost;
 import 'support.dart';
 
 Future<void> frames(WidgetTester tester, [int count = 8]) async {
@@ -43,15 +49,15 @@ void main() {
     return fake;
   }
 
-  testWidgets('the home lists the Main Bot first, then the others and the group; a row opens its chat', (tester) async {
+  testWidgets('the home lists the group before Bots and the Main Bot first among Bots', (tester) async {
     await open(tester, const BotsPage());
     expect(tester.widget<AppPage>(find.byType(AppPage)).title, 'DS Bot');
     expect(find.text('本机 · 3 个 Bot · 1 个群聊'), findsOneWidget);
     final chief = tester.getTopLeft(find.text('Chief'));
     final writer = tester.getTopLeft(find.text('Writer'));
     final room = tester.getTopLeft(find.text('发布会'));
+    expect(room.dy, lessThan(chief.dy));
     expect(chief.dy, lessThan(writer.dy));
-    expect(writer.dy, lessThan(room.dy));
     expect(find.text('主'), findsOneWidget);
     expect(find.text('正在运行命令'), findsOneWidget);
     expect(find.text('Writer：初稿写好了，放在 docs/launch.md'), findsOneWidget);
@@ -321,6 +327,42 @@ void main() {
     await frames(tester, 4);
     expect(find.byType(BotsPage), findsOneWidget);
     expect(tester.widget<AppPage>(find.byType(AppPage)).title, 'DS Bot');
+  });
+
+  testWidgets('the host DS Bot entry stays below the filters in a workspace without Bot sessions', (tester) async {
+    final host = FakeWorkspaceHost()..seedSession('regular', 'Regular chat', DateTime(2026));
+    final workspace = host.seedWorkspace('/project', sessionIds: ['regular']);
+    final connection = workspaceHost(host);
+    addTearDown(connection.client.close);
+    usePhoneView(tester);
+    await tester.pumpWidget(
+      goldenApp(
+        home: Scaffold(
+          body: shell.SessionsDrawer(onClose: () {}, onOpen: (_) {}),
+        ),
+        brightness: Brightness.light,
+        overrides: [
+          workspacePrefsProvider.overrideWith(
+            () => FixedWorkspacePrefs(WorkspacePrefs(loaded: true, selected: workspace['workspaceId']! as String)),
+          ),
+          ...dsBotOverrides(FakeDsBotTransport(), connection: connection),
+        ],
+      ),
+    );
+    await frames(tester);
+    final drawer = find.byType(shell.SessionsDrawer);
+    final container = ProviderScope.containerOf(tester.element(drawer));
+    final row = find.byType(shell.DsBotDrawerRow);
+    final filters = find.byType(DrawerFilterBar);
+    for (final filter in DrawerFilter.values) {
+      container.read(drawerFilterProvider.notifier).set(filter);
+      await frames(tester, 2);
+      expect(row.hitTestable(), findsOneWidget, reason: filter.name);
+      expect(tester.getTopLeft(row).dy, greaterThanOrEqualTo(tester.getBottomLeft(filters).dy));
+    }
+    await tester.tap(row);
+    await frames(tester);
+    expect(find.byType(BotsPage), findsOneWidget);
   });
 
   testWidgets('without DS Bot the drawer row draws nothing', (tester) async {

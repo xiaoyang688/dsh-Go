@@ -124,6 +124,8 @@ used under the MIT License with the author's permission.
 | `app/android/.../runtime/GuestSetup.kt` | `ds-bot/src/host/tools.js`、`prompt.js`（`show_view` 说明与提示规则） |
 | `app/lib/ui/bots/bot_mention.dart` | `ds-bot/src/shared/mentions.js`（「所有人」与地址判定等提及规则） |
 
+头像取自已安装的 `ds-bot@0.3.10`（https://github.com/Fei2411/DS-Bot），使用相同的 Apache-2.0 许可。`app/lib/ui/bots/bot_character_data.dart` 移植发布包 `client.js` 中 `src/client/characters.js` 的 20 个角色的矢量轮廓、眼睛及装饰；`bot_character.dart` 将配形规则、渐变和 CSS 状态动效改为 Flutter 绘制及动画；`bot_avatar.dart` 将发布包中的 `RoomAvatar` 分组布局改为 Flutter。
+
 DS Bot 的 NOTICE 原文附在文末。
 
 ### ds-harness-remote（MIT）

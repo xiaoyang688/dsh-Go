@@ -65,9 +65,9 @@ class HostLinkError implements Exception {
   String toString() => detail == null ? message : appL10n.remoteErrorDetail(message, detail!);
 }
 
-/// How a DSH Remote tunnel travels: straight to the computer (LAN or P2P),
-/// through a TURN server, or through the Server's relay.
+/// How a Remote Host is reached: configured DSH Web HTTPS or a Remote tunnel.
 enum RelayPath {
+  https,
   lan,
   p2p,
   direct,
@@ -75,6 +75,7 @@ enum RelayPath {
   relay;
 
   String get label => switch (this) {
+    RelayPath.https => appL10n.remotePathHttps,
     RelayPath.lan => appL10n.remotePathLan,
     RelayPath.p2p => appL10n.remotePathP2p,
     RelayPath.direct => appL10n.remotePathDirect,
@@ -132,6 +133,8 @@ enum HostLinkDiagnosticCode {
   remoteConnectionFailed,
   remoteRateLimited,
   remoteHistoryModeChanged,
+  httpsUnauthorized,
+  httpsUnavailable,
 }
 
 enum NetworkIpVersion { ipv4, ipv6 }
@@ -172,6 +175,7 @@ class RemoteNetworkStatus {
           'turnFailed',
           'turnTimeout',
           'pathUnverified',
+          'httpsUnavailable',
         }.contains(fallbackReason)
       ? fallbackReason
       : 'unknown';

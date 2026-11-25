@@ -174,7 +174,9 @@ Copyright 2026 Fei2411 and the DS Bot contributors
 
 Portions are derived from DS Bot (https://github.com/Fei2411/DeepSeek-Bot, commit 1bebe82)
 and modified: the interactive replies and their chart ticks, the group-chat @ mentions, the
-DS Bot colours and the show_view guidance. Each file says what changed. Licensed under the
+DS Bot colours and the show_view guidance. The character graphics, avatar motion and group
+avatar layout are adapted from ds-bot 0.3.10 (https://github.com/Fei2411/DS-Bot).
+Each file says what changed. Licensed under the
 Apache License 2.0:
 
 ''';

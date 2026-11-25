@@ -9,9 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
-import '../../state/settings_state.dart';
+import '../../state/attachments.dart';
 import '../../state/bots_state.dart';
-import '../chat/composer.dart';
 import '../chat/widgets/chat_card.dart';
 import '../common/status_dot.dart';
 import '../features/feature_kit.dart';
@@ -20,12 +19,14 @@ import 'bot_stop_guard.dart';
 import 'bot_action_scope.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'bot_composer.dart';
 import 'bot_draft_send.dart';
 import 'bot_avatar.dart';
 import 'unavailable_message.dart';
 import 'bot_chat_kit.dart';
 import 'bot_chat_page.dart';
 import 'bot_format.dart';
+import 'bot_history_images.dart';
 import 'bot_mention.dart';
 import 'room_approval_action.dart';
 import 'room_details_page.dart';
@@ -75,15 +76,22 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
     super.dispose();
   }
 
-  Future<void> _send(BotActionScope target) async {
-    if (!mounted || target.roomId != widget.roomId || !target.current(context, ref)) return;
-    if (!ref.read(dsBotProvider).ready) return;
-    await sendBotDraft(
+  bool _sendsTo(BotActionScope target) =>
+      mounted &&
+      target.roomId == widget.roomId &&
+      target.current(context, ref) &&
+      ref.read(dsBotProvider).ready &&
+      !ref.read(roomChatProvider(widget.roomId)).stale;
+
+  Future<bool> _send(BotActionScope target, List<DraftAttachment> images) async {
+    if (!_sendsTo(target)) return false;
+    return sendBotDraft(
       context,
       ref,
       _input,
       roomId: widget.roomId,
-      send: (text) => ref.read(roomChatProvider(widget.roomId).notifier).send(text),
+      images: images,
+      send: (text, ids) => ref.read(roomChatProvider(widget.roomId).notifier).send(text, images: ids),
     );
   }
 
@@ -148,6 +156,24 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
       _continuing = false;
       _continuedPause = null;
     }
+    final chatProvider = roomChatProvider(widget.roomId);
+    final chat = ref.watch(chatProvider);
+    if (chat.staleTitle case final title?) {
+      return BotReconnectTranscript(
+        title: title,
+        items: chat.items,
+        room: true,
+        scrolledUnder: _scrolled,
+        error: chat.error ?? status.error,
+        onRetry: () {
+          if (ref.read(dsBotProvider).ready) {
+            unawaited(ref.read(chatProvider.notifier).refresh());
+          } else {
+            ref.read(dsBotProvider.notifier).retry();
+          }
+        },
+      );
+    }
     final team = status.team;
     final room = team?.room(widget.roomId);
     final continueTarget = BotActionScope(ref, roomId: widget.roomId);
@@ -158,14 +184,11 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
     if (team == null || room == null || mobileUnavailable) {
       return AppPage.list(
         title: l10n.botsGroupChat,
-        children: [
-          DsBotUnavailableMessage(status: status, goneIcon: AppIcons.groupChat, goneTitle: l10n.botsRoomGone),
-        ],
+        children: [DsBotUnavailableMessage(status: status, goneIcon: AppIcons.groupChat, goneTitle: l10n.botsRoomGone)],
       );
     }
     final members = [for (final id in room.members) ?team.bot(id)];
     _mentions.setMembers(members, room.admin);
-    final chat = ref.watch(roomChatProvider(widget.roomId));
     final working = status.live.rooms[room.id] ?? const <DsBotWork>[];
     final approvals = [
       for (final a in status.live.approvals)
@@ -223,20 +246,31 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
                 padding: rowPadding(row),
                 child: switch (row) {
                   BotTimeRow(:final time) => BotTimeLine(time),
-                  BotPendingRow(:final pending) => BotUserMessage(text: pending.text, pending: true),
+                  BotPendingRow(:final pending) => BotUserMessage(
+                    text: pending.text,
+                    images: pending.images,
+                    pending: true,
+                  ),
                   BotStreamingRow() => const SizedBox.shrink(),
                   BotTypingRow(:final bot, :final label) => BotTypingLine(bot: bot, label: label),
                   BotItemRow(:final item, :final continued) => switch (item.kind) {
-                    DsBotItemKind.user => BotUserMessage(text: item.text, images: item.images),
+                    DsBotItemKind.user => BotUserMessage(
+                      text: item.text,
+                      images: item.images,
+                      attachments: item.imageRefs.isEmpty
+                          ? null
+                          : BotHistoryImages(item: item, conversationId: room.id, alignEnd: true),
+                    ),
                     DsBotItemKind.bot => GroupMessage(
                       item: item,
+                      conversationId: room.sessionId ?? room.id,
                       bot: team.bot(item.botId),
                       continued: continued,
                       admin: item.botId != null && item.botId == room.admin,
                       onOpenBot: team.bot(item.botId) == null
                           ? null
                           : () => Navigator.of(context).push(BotChatPage.route(item.botId!)),
-                      onShowAll: item.whole == null ? null : () => _showAll(item, fullTextScope),
+                      onShowAll: item.whole == null || status.isDshRemote ? null : () => _showAll(item, fullTextScope),
                     ),
                     DsBotItemKind.event => BotEventLine(
                       text: roomEventText(item),
@@ -265,18 +299,19 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
               title: l10n.commonPaused,
               tone: ChatCardTone.attention,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(ChatCard.inset, 0, ChatCard.inset, ChatCard.inset),
-                  child: FilledButton.icon(
-                    key: const ValueKey('room-continue'),
-                    onPressed:
-                        api == null || readOnly || _continuing || _continuedPause == room.pausedCallIds.join('\u0000')
-                        ? null
-                        : () => _continue(room, continueTarget),
-                    icon: const Icon(AppIcons.play, size: 18),
-                    label: Text(l10n.commonContinue),
+                if (!status.isDshRemote)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(ChatCard.inset, 0, ChatCard.inset, ChatCard.inset),
+                    child: FilledButton.icon(
+                      key: const ValueKey('room-continue'),
+                      onPressed:
+                          api == null || readOnly || _continuing || _continuedPause == room.pausedCallIds.join('\u0000')
+                          ? null
+                          : () => _continue(room, continueTarget),
+                      icon: const Icon(AppIcons.play, size: 18),
+                      label: Text(l10n.commonContinue),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -321,17 +356,19 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
           error: chat.error,
           onDismiss: () => ref.read(roomChatProvider(widget.roomId).notifier).dismissError(),
         ),
-        Composer(
-          hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
+        BotComposer(
+          key: ValueKey((status.host, status.hello?.boot, api, room.id)),
+          sendImages: status.supports('send-images'),
+          current: () => _sendsTo(sendTarget),
           controller: _input,
           placeholder: l10n.botsGroupComposerHint,
           focusNode: _focus,
           connected: api != null && !readOnly,
           running: chat.running,
-          onSend: () => _send(sendTarget),
+          onSend: (images) => _send(sendTarget, images),
           onStop: _stopGuard.action(roomId: room.id),
           onKeyEvent: _mentions.handleKey,
-          leading: MentionKey(
+          mention: MentionKey(
             onPressed: api == null || readOnly
                 ? null
                 : () {

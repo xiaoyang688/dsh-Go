@@ -1,14 +1,17 @@
-// Bot 首页: the DS Bot team of the active
-// host. Main Bots pinned first, the other Bots by latest activity, then the
-// group chats; each row says who it is, what it said or does, and whether
-// something is unread. Without a usable DS Bot, the install card.
+// Bot 首页: the DS Bot team of the active host. Group chats come first, then
+// Main Bots and other Bots. Each row shows the latest activity and unread
+// count. Without a usable DS Bot, show the install card.
+
+import 'dart:async';
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/bot_layout_state.dart';
 import '../../state/bots_state.dart';
+import 'bot_action_scope.dart';
 import '../common/fluid_bits.dart';
 import '../common/list_page_row.dart';
 import '../features/feature_kit.dart';
@@ -19,6 +22,7 @@ import '../theme/theme.dart';
 import 'bot_avatar.dart';
 import 'bot_chat_page.dart';
 import 'bot_format.dart';
+import 'bot_layout.dart';
 import 'install_card.dart';
 import 'new_bot_page.dart';
 import 'new_room_sheet.dart';
@@ -39,7 +43,11 @@ class BotsPage extends ConsumerWidget {
       subtitle: Text(_summary(status)),
       children: [
         if (status.ready && team != null)
-          _Team(status: status, team: team)
+          _Team(
+            key: ValueKey((status.host, status.hello?.boot, ref.read(dsBotProvider.notifier).api)),
+            status: status,
+            team: team,
+          )
         else
           switch (status.availability) {
             DsBotAvailability.offline => const FeatureOffline(),
@@ -73,15 +81,74 @@ String _summary(DsBotStatus status) {
   ].join(' · ');
 }
 
-class _Team extends ConsumerWidget {
-  const _Team({required this.status, required this.team});
+class _Team extends ConsumerStatefulWidget {
+  const _Team({super.key, required this.status, required this.team});
 
   final DsBotStatus status;
   final DsBotTeam team;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Team> createState() => _TeamState();
+}
+
+class _TeamState extends ConsumerState<_Team> {
+  DsBotGoLayout? _saved;
+  bool _copying = false;
+  String? _copyMessage;
+  ({GoLayoutConnection owner, DsBotGoLayout layout})? _pendingVerification;
+
+  Future<void> _copyLayout(GoLayoutConnection owner, GoLayoutSettings expected, DsBotGoLayout legacy) async {
+    if (_copying) return;
+    final bot = BotActionScope(ref);
     final l10n = context.l10n;
+    bool current() => mounted && bot.current(context, ref) && currentGoLayoutConnection(ref.read) == owner;
+    if (!current()) return;
+    final api = ref.read(goLayoutApiProvider)(owner.client);
+    setState(() {
+      _copying = true;
+      _copyMessage = null;
+      _pendingVerification = null;
+    });
+    try {
+      final source = await bot.api!.state();
+      if (!current()) return;
+      final latest = await api.describe();
+      if (!current()) return;
+      if (latest == null ||
+          !latest.writable ||
+          latest.layout != null ||
+          latest.revision != expected.revision ||
+          source.team?.readOnly != null ||
+          !GoLayoutApi.sameLayout(source.team?.goLayout, legacy)) {
+        throw DshRemoteException('settings/conflict', 'Layout changed before copying');
+      }
+      _pendingVerification = (owner: owner, layout: legacy);
+      await api.save(latest, legacy);
+      if (!current()) return;
+      final confirmed = await api.describe();
+      if (!current()) return;
+      if (!GoLayoutApi.sameLayout(confirmed?.layout, legacy)) {
+        throw DshRemoteException('settings/conflict', 'Layout changed after copying');
+      }
+      setState(() {
+        _copyMessage = l10n.botsLayoutCopied;
+        _pendingVerification = null;
+      });
+    } catch (error) {
+      if (!current()) return;
+      setState(() => _copyMessage = isBotLayoutConflict(error) ? l10n.botsLayoutConflict : l10n.botsLayoutCopyFailed);
+      unawaited(ref.read(dsBotProvider.notifier).refresh());
+    } finally {
+      if (current()) ref.invalidate(goLayoutSettingsProvider(owner));
+      if (mounted) setState(() => _copying = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final status = widget.status;
+    final team = widget.team;
     final inbox = ref.watch(dsBotInboxProvider);
     final readOnly = status.readOnly != null;
     DateTime? latest(String id) => inbox.latest[id]?.time;
@@ -92,32 +159,49 @@ class _Team extends ConsumerWidget {
         if (!team.isMain(bot.id)) bot,
     ]..sort((a, b) => newest(latest(a.id) ?? a.createdAt, latest(b.id) ?? b.createdAt));
     final rooms = [...team.rooms]..sort((a, b) => newest(latest(a.id) ?? a.createdAt, latest(b.id) ?? b.createdAt));
+    final owner = ref.watch(goLayoutConnectionProvider);
+    final settings = owner == null ? null : ref.watch(goLayoutSettingsProvider(owner));
+    final independent = settings?.value;
+    final known = settings is AsyncData<GoLayoutSettings?> && !settings.isLoading;
+    final legacy = team.goLayout;
+    final pending = _pendingVerification;
+    final verifiedOnRefresh =
+        !_copying &&
+        known &&
+        pending != null &&
+        pending.owner == owner &&
+        GoLayoutApi.sameLayout(independent?.layout, pending.layout);
+    final saved = _saved;
+    final legacyLayout = legacy != null && saved != null && saved.revision > legacy.revision ? saved : legacy;
+    final layout =
+        independent?.layout ??
+        legacyLayout ??
+        (independent == null ? null : DsBotGoLayout(revision: 0, folders: [], bots: [], rooms: []));
+    final botApi = ref.read(dsBotProvider.notifier).api;
+    final canCopy =
+        known &&
+        independent != null &&
+        independent.layout == null &&
+        legacy != null &&
+        !readOnly &&
+        !(saved != null && saved.revision > legacy.revision);
+    final canEdit =
+        known &&
+        owner != null &&
+        !_copying &&
+        (independent == null
+            ? canEditLegacyBotLayout(status, botApi)
+            : independent.writable && (independent.layout != null || legacy == null));
+    final bots = [...mains, ...others];
+    Widget botRow(DsBot bot) => BotRow(bot: bot, team: team, live: status.live, inbox: inbox);
     var index = 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ListPageCard(
-          title: 'Bot',
-          children: [
-            for (final bot in [...mains, ...others])
-              FadeSlideIn(
-                index: index++,
-                child: BotRow(bot: bot, team: team, live: status.live, inbox: inbox),
-              ),
-            ListPageRow(
-              icon: AppIcons.add,
-              title: l10n.botsNewBot,
-              leadingWidth: 40,
-              chevron: false,
-              onTap: readOnly ? null : () => Navigator.of(context).push(NewBotPage.route()),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        ListPageCard(
           title: l10n.botsGroupChat,
           children: [
-            for (final room in rooms)
+            for (final room in layout == null ? rooms : orderedBotRooms(rooms, layout))
               FadeSlideIn(
                 index: index++,
                 child: RoomRow(room: room, team: team, live: status.live, inbox: inbox),
@@ -131,6 +215,57 @@ class _Team extends ConsumerWidget {
             ),
           ],
         ),
+        const SizedBox(height: 24),
+        ListPageCard(
+          title: 'Bot',
+          children: [
+            if (layout == null)
+              for (final bot in bots) FadeSlideIn(index: index++, child: botRow(bot))
+            else ...[
+              for (final bot in mains) FadeSlideIn(index: index++, child: botRow(bot)),
+              BotLayoutTree(layout: layout, bots: others, buildBot: botRow),
+            ],
+            ListPageRow(
+              icon: AppIcons.add,
+              title: l10n.botsNewBot,
+              leadingWidth: 40,
+              chevron: false,
+              onTap: readOnly ? null : () => Navigator.of(context).push(NewBotPage.route()),
+            ),
+            if (canCopy)
+              ListPageRow(
+                icon: AppIcons.edit,
+                title: l10n.botsLayoutCopy,
+                leadingWidth: 40,
+                onTap: !_copying && independent.writable ? () => _copyLayout(owner!, independent, legacy) : null,
+              )
+            else if (layout != null)
+              ListPageRow(
+                icon: AppIcons.edit,
+                title: l10n.botsLayoutEdit,
+                leadingWidth: 40,
+                onTap: canEdit
+                    ? () async {
+                        final scope = BotLayoutScope(owner, independent, ref);
+                        final saved = await showBotLayoutEditor(context, scope, layout, bots, rooms);
+                        if (context.mounted && saved != null && independent == null && scope.connected(context, ref)) {
+                          setState(() => _saved = saved);
+                        }
+                      }
+                    : null,
+              ),
+          ],
+        ),
+        if (verifiedOnRefresh)
+          FeatureNote(l10n.botsLayoutCopied)
+        else if (_copyMessage case final message?)
+          FeatureNote(message),
+        if (settings?.hasError == true)
+          ListPageRow(
+            icon: AppIcons.error,
+            title: l10n.botsLayoutLoadFailed,
+            onTap: () => ref.invalidate(goLayoutSettingsProvider(owner!)),
+          ),
         if (readOnly) FeatureNote('${status.readOnly}'),
       ],
     );
@@ -184,7 +319,13 @@ class BotRow extends StatelessWidget {
       ].join(l10n.botsListSeparator),
       excludeSemantics: true,
       child: ListPageRow(
-        leading: BotAvatar(bot: bot, size: 40, working: work != null),
+        leading: BotAvatar(
+          bot: bot,
+          size: 40,
+          state: botAvatarState(live, bot.id, team: team),
+          main: team.isMain(bot.id),
+          live: true,
+        ),
         leadingWidth: 40,
         title: bot.name,
         badge: team.isMain(bot.id) ? BotTag(l10n.botsMainTag) : null,

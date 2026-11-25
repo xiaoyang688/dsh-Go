@@ -24,6 +24,7 @@ import '../theme/theme.dart';
 import '../web/web_view_page.dart';
 import 'host_key_dialog.dart';
 import 'host_status.dart';
+import 'https_line_dialog.dart';
 import 'link_progress.dart';
 import 'network_details_sheet.dart';
 import 'pairing_page.dart';
@@ -554,13 +555,7 @@ class _RelayHostsSection extends ConsumerWidget {
           )
         else
           for (final h in account.hosts)
-            _RelayRow(
-              host: h,
-              active: active == HostRef.relay(h.id),
-              onTap: h.online || active == HostRef.relay(h.id)
-                  ? () => onUse(HostRef.relay(h.id, name: h.name))
-                  : () => onOffline(h),
-            ),
+            _RelayRow(host: h, active: active == HostRef.relay(h.id), onUse: onUse, onOffline: onOffline),
         if (ref.watch(relayPairingSupportProvider).value ?? false)
           SettingsTile(
             icon: AppIcons.qrCode,
@@ -741,16 +736,22 @@ class _Waiting extends StatelessWidget {
 }
 
 class _RelayRow extends ConsumerWidget {
-  const _RelayRow({required this.host, required this.active, required this.onTap});
+  const _RelayRow({required this.host, required this.active, required this.onUse, required this.onOffline});
 
   final RelayHost host;
   final bool active;
-  final VoidCallback? onTap;
+  final ValueChanged<HostRef> onUse;
+  final ValueChanged<RelayHost> onOffline;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
+    final scope = ref.watch(remoteHttpsScopeProvider);
     final hostRef = HostRef.relay(host.id, name: host.name);
+    final httpsConfigured =
+        !host.online &&
+        !active &&
+        ref.watch(remoteHttpsLaunchUrlProvider(host.id).select((value) => value.asData?.value != null));
     final status = active ? ref.watch(hostLinkStatusProvider(hostRef)).value : null;
     final view = status == null ? HostStatusView.ofRelayHost(host) : HostStatusView.ofLink(status);
     return Semantics(
@@ -762,7 +763,7 @@ class _RelayRow extends ConsumerWidget {
         tinted: false,
         title: host.name,
         subtitle: host.subtitle,
-        onTap: onTap,
+        onTap: host.online || active || httpsConfigured ? () => onUse(hostRef) : () => onOffline(host),
         value: KeyedSubtree(
           key: ValueKey('remote-status-${host.id}'),
           child: status?.isConnected == true
@@ -777,7 +778,13 @@ class _RelayRow extends ConsumerWidget {
                 )
               : _HostState(view),
         ),
-        trailing: active ? Icon(AppIcons.selected, size: 20, color: scheme.primary) : const SizedBox(width: 20),
+        trailing: scope == null
+            ? null
+            : _EdgeIconButton(
+                icon: const Icon(AppIcons.configure, size: 20),
+                tooltip: l10n.remoteHttpsLine,
+                onPressed: () => showRemoteHttpsLine(context, host, scope),
+              ),
         chevron: false,
       ),
     );

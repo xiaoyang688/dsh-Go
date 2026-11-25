@@ -25,6 +25,7 @@ import 'bot_sheets.dart';
 import 'bots_page.dart' show BotTag;
 import 'memory_card.dart';
 import 'working_folder_sheet.dart';
+import 'room_goal_sheet.dart';
 import 'room_relay_limit_sheet.dart';
 import 'room_chat_page.dart' show GroupApprovalCard;
 
@@ -134,9 +135,7 @@ class RoomDetailsPage extends ConsumerWidget {
     if (team == null || room == null || mobileUnavailable) {
       return AppPage.list(
         title: l10n.botsGroupChat,
-        children: [
-          DsBotUnavailableMessage(status: status, goneIcon: AppIcons.groupChat, goneTitle: l10n.botsRoomGone),
-        ],
+        children: [DsBotUnavailableMessage(status: status, goneIcon: AppIcons.groupChat, goneTitle: l10n.botsRoomGone)],
       );
     }
     final dsh = DshColors.of(context);
@@ -198,7 +197,11 @@ class RoomDetailsPage extends ConsumerWidget {
               children: [
                 for (final bot in members)
                   ListPageRow(
-                    leading: BotAvatar(bot: bot, size: 32, working: working.containsKey(bot.id)),
+                    leading: BotAvatar(
+                      bot: bot,
+                      size: 32,
+                      state: botAvatarState(status.live, bot.id, roomId: room.id),
+                    ),
                     title: bot.name,
                     badge: room.admin == bot.id ? BotTag(l10n.botsAdmin) : null,
                     subtitle: working.containsKey(bot.id)
@@ -257,7 +260,16 @@ class RoomDetailsPage extends ConsumerWidget {
                         : (_) {},
                   ),
                 ),
-                if (room.relayLimitDefault != null)
+                if (status.hello?.supportsRoomGoals == true || room.goal != null)
+                  ListPageRow(
+                    key: const ValueKey('room-goal'),
+                    icon: AppIcons.goal,
+                    title: l10n.botsGroupGoal,
+                    subtitle: room.goal?.title,
+                    value: room.goal == null ? l10n.commonNotSet : roomGoalStatus(l10n, room.goal!),
+                    onTap: () => showRoomGoalSheet(context, scope),
+                  ),
+                if (room.relayLimitDefault != null && !status.isDshRemote)
                   ListPageRow(
                     key: const ValueKey('room-relay-limit'),
                     icon: AppIcons.pause,

@@ -4,6 +4,7 @@
 // group sheet. Regenerate with
 // `flutter test --update-goldens test/bots/bots_golden_test.dart`.
 
+import 'package:dsh_app/state/read_list_identity.dart';
 import 'package:dsh_app/ui/bots/bot_chat_page.dart';
 import 'package:dsh_app/ui/bots/bot_details_page.dart';
 import 'package:dsh_app/ui/bots/bots_page.dart';
@@ -42,7 +43,11 @@ void goldenBots(
       addTearDown(tester.view.reset);
       final fake = transport();
       await tester.pumpWidget(
-        goldenApp(home: home(), brightness: brightness, overrides: [...dsBotOverrides(fake), ...extra]),
+        goldenApp(
+          home: home(),
+          brightness: brightness,
+          overrides: [...dsBotOverrides(fake), readListIdentityProvider.overrideWithValue(null), ...extra],
+        ),
       );
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 100));

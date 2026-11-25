@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n.dart';
 import '../remote/link_status.dart';
 import '../remote/network_watch.dart';
+import '../remote/relay/https_host_link.dart';
 import '../remote/relay/relay_backend.dart';
 import '../remote/ssh/ssh_link.dart';
 import '../remote/ssh/ssh_transport.dart';
@@ -212,7 +213,7 @@ final hostLinkProvider = Provider.autoDispose.family<HostLink?, HostRef>((ref, h
       return link;
     case HostKind.relay:
       final backend = ref.watch(relayBackendProvider);
-      final link = RelayHostLink(
+      final fallback = RelayHostLink(
         backend: backend,
         hostId: host.id,
         // Fresh presence straight from the server (the account list on the
@@ -224,6 +225,10 @@ final hostLinkProvider = Provider.autoDispose.family<HostLink?, HostRef>((ref, h
           }
           return null;
         },
+      );
+      final link = HttpsFirstHostLink(
+        fallback: fallback,
+        launchUrl: ref.watch(remoteHttpsLaunchUrlProvider(host.id).future),
         kicks: ref.read(networkKicksProvider),
       );
       _observeRemoteLink(ref, link, host.kind);
@@ -371,7 +376,9 @@ class RemoteConnectionController extends AsyncNotifier<HostConnection?> {
     if (link == null) return;
     final phase = link.status.phase;
     // A link still retrying on its own just skips its wait.
-    if (phase != HostLinkPhase.reconnecting && (phase == HostLinkPhase.failed || state.hasError)) {
+    if (link.status.path == RelayPath.https) {
+      link.retry();
+    } else if (phase != HostLinkPhase.reconnecting && (phase == HostLinkPhase.failed || state.hasError)) {
       ref.invalidateSelf();
     } else {
       link.retry();
@@ -604,6 +611,8 @@ AsyncValue<HostConnection?> _connectionForHost(Ref ref, HostRef host) {
       if (!loaded) return const AsyncLoading();
       return ref.watch(remoteConnectionProvider(host));
     case HostKind.relay:
-      return ref.watch(remoteConnectionProvider(host));
+      // Replacing a configured route retires its client. Never expose its
+      // previous value as a writable connection while the new link opens.
+      return ref.watch(remoteConnectionProvider(host)).unwrapPrevious();
   }
 }

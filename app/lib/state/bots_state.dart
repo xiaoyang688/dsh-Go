@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:dsh_remote/dsh_remote.dart' show RemoteTunnelCarrier;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,11 +17,11 @@ import 'app_info.dart';
 import 'connection_state.dart';
 import 'hosts_state.dart';
 import 'notify_state.dart';
+import 'read_list_identity.dart';
 
 // ── The plugin on the active host ────────────────────────────────────────────
 
-/// Builds the API for a connection; null when the carrier cannot reach plugin
-/// routes (the relay). Tests swap in a fake transport.
+/// Builds the API when the carrier can reach DS Bot. Tests can supply a fake.
 final dsBotApiFactoryProvider = Provider<DsBotApi? Function(HostConnection connection)>(
   (ref) =>
       (connection) => DsBotApi.of(connection.client),
@@ -36,7 +37,7 @@ enum DsBotAvailability {
   /// Connecting to the host, or asking DS Bot who it is.
   connecting,
 
-  /// Reached through the relay, which does not forward plugin routes.
+  /// The DSH Remote host cannot currently forward DS Bot methods.
   relay,
 
   /// The host has no DS Bot (or has it turned off).
@@ -59,11 +60,13 @@ class DsBotStatus {
     this.host = HostRef.local,
     this._hostLabel,
     this.isLocal = true,
+    this.isDshRemote = false,
     this.hello,
     this.team,
     this.live = const DsBotLive(),
     this.error,
     this.feedConnected = false,
+    this.retainsTranscript = false,
   });
 
   final DsBotAvailability availability;
@@ -71,6 +74,9 @@ class DsBotStatus {
   final String? _hostLabel;
   String get hostLabel => _hostLabel ?? appL10n.commonThisPhone;
   final bool isLocal;
+
+  /// Remote v1 excludes file-text and the newer room relay controls.
+  final bool isDshRemote;
   final DsBotHello? hello;
 
   /// Null until the first `state` answer.
@@ -78,6 +84,9 @@ class DsBotStatus {
   final DsBotLive live;
   final String? error;
   final bool feedConnected;
+
+  /// Auth has not been rejected, and the current API can still be refreshed.
+  final bool retainsTranscript;
 
   bool get ready => availability == DsBotAvailability.ready && team != null;
 
@@ -93,16 +102,19 @@ class DsBotStatus {
     DsBotLive? live,
     String? Function()? error,
     bool? feedConnected,
+    bool? retainsTranscript,
   }) => DsBotStatus(
     availability: availability ?? this.availability,
     host: host,
     hostLabel: _hostLabel,
     isLocal: isLocal,
+    isDshRemote: isDshRemote,
     hello: hello ?? this.hello,
     team: team ?? this.team,
     live: live ?? this.live,
     error: error == null ? this.error : error(),
     feedConnected: feedConnected ?? this.feedConnected,
+    retainsTranscript: retainsTranscript ?? this.retainsTranscript,
   );
 }
 
@@ -115,6 +127,27 @@ String describeDsBotError(Object error) => switch (error) {
   DshHttpException(:final statusCode) when statusCode == 401 || statusCode == 403 => appL10n.stateHostAuthFailed,
   DshTransportException() => appL10n.commonEngineUnreachable,
   _ => appL10n.stateUnexpectedError,
+};
+
+bool _rejectsTranscript(Object? error) => switch (error) {
+  DshHttpException(:final statusCode) => statusCode == 401 || statusCode == 403 || statusCode == 404,
+  DshCarrierRefusedException() => true,
+  DshRemoteException(:final code) => const {
+    'bot/not-found',
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_ALLOWED',
+    'METHOD_NOT_FOUND',
+  }.contains(code),
+  HostLinkError(:final kind) => const {
+    HostLinkErrorKind.authFailed,
+    HostLinkErrorKind.badPrivateKey,
+    HostLinkErrorKind.hostKeyMismatch,
+    HostLinkErrorKind.hostKeyRejected,
+    HostLinkErrorKind.hostKeyUnverified,
+    HostLinkErrorKind.loginFailed,
+    HostLinkErrorKind.notLoggedIn,
+  }.contains(kind),
+  _ => false,
 };
 
 /// Compact ranges: live notices are ordered, even while a catch-up request
@@ -150,6 +183,10 @@ class DsBotController extends Notifier<DsBotStatus> {
   StreamSubscription<DsBotFeedEvent>? _feedSub;
   int _generation = 0;
   Timer? _stateTimer;
+  Timer? _unaryPollTimer;
+  int? _unaryPollGeneration;
+  int? _resumeGeneration;
+  static const unaryPollEvery = Duration(seconds: 5);
   int? _stateBusyGeneration;
   bool _stateAgain = false;
   String? _noticeBoot;
@@ -159,6 +196,7 @@ class DsBotController extends Notifier<DsBotStatus> {
   final _noticed = _NoticeSequences();
 
   final _events = StreamController<DsBotFeedEvent>.broadcast();
+  final _visibleRefreshes = StreamController<bool>.broadcast();
   final _notices = StreamController<({DsBotNotice notice, bool caughtUp})>.broadcast();
 
   /// The API of the current host; null unless the host can be reached.
@@ -172,6 +210,9 @@ class DsBotController extends Notifier<DsBotStatus> {
   /// Feed events, for the open chats.
   Stream<DsBotFeedEvent> get events => _events.stream;
 
+  /// Refresh the visible conversation. True denotes a routine unary poll.
+  Stream<bool> get visibleRefreshes => _visibleRefreshes.stream;
+
   /// New notices, live or read back after a reconnect (`caughtUp`).
   Stream<({DsBotNotice notice, bool caughtUp})> get notices => _notices.stream;
 
@@ -180,21 +221,51 @@ class DsBotController extends Notifier<DsBotStatus> {
     final connAsync = ref.watch(activeConnectionProvider);
     final host = ref.watch(activeHostProvider);
     ref.onDispose(_teardown);
-    final conn = connAsync.value;
+    ref.listen(appForegroundProvider, (_, foreground) {
+      if (foreground) {
+        kick();
+      } else {
+        _unaryPollTimer?.cancel();
+        _unaryPollTimer = null;
+      }
+    });
+    final conn = readListConnection(connAsync, host);
     if (conn == null) {
       return DsBotStatus(
         availability: connAsync.isLoading ? DsBotAvailability.connecting : DsBotAvailability.offline,
         host: host,
+        retainsTranscript: !_rejectsTranscript(connAsync.error),
       );
     }
+    final isDshRemote = conn.client.carrier is RemoteTunnelCarrier;
     final base = DsBotStatus(
       availability: DsBotAvailability.connecting,
       host: host,
       hostLabel: conn.isLocal ? null : conn.label,
       isLocal: conn.isLocal,
+      isDshRemote: isDshRemote,
+      retainsTranscript: true,
     );
+    if (isDshRemote) {
+      // A reconnect can change capabilities while keeping the same DshClient.
+      final mux = conn.client.mux;
+      final sub = mux.states.listen((next) {
+        // A terminal refusal can be followed by another state before Riverpod rebuilds.
+        if (next == DshConnectionState.unauthorized && state.retainsTranscript) _retireTranscript();
+        ref.invalidateSelf();
+      });
+      ref.onDispose(() => unawaited(sub.cancel()));
+      if (mux.state != DshConnectionState.connected) {
+        return mux.state == DshConnectionState.unauthorized || mux.state == DshConnectionState.closed
+            ? base.copyWith(
+                availability: DsBotAvailability.offline,
+                retainsTranscript: mux.state != DshConnectionState.unauthorized,
+              )
+            : base;
+      }
+    }
     final api = ref.read(dsBotApiFactoryProvider)(conn);
-    if (api == null) return base.copyWith(availability: DsBotAvailability.relay);
+    if (api == null) return base.copyWith(availability: DsBotAvailability.relay, retainsTranscript: false);
     _api = api;
     final generation = ++_generation;
     scheduleMicrotask(() => _open(generation));
@@ -205,6 +276,10 @@ class DsBotController extends Notifier<DsBotStatus> {
     _generation++;
     _stateTimer?.cancel();
     _stateTimer = null;
+    _unaryPollTimer?.cancel();
+    _unaryPollTimer = null;
+    _unaryPollGeneration = null;
+    _resumeGeneration = null;
     _stateBusyGeneration = null;
     _stateAgain = false;
     _noticeBoot = null;
@@ -235,28 +310,126 @@ class DsBotController extends Notifier<DsBotStatus> {
       hello = await api.hello(version: AppInfo.version);
     } catch (error) {
       if (!_current(generation)) return;
+      if (_markRemoteUnavailable(error)) return;
       final availability = switch (error) {
         DshHttpException(:final statusCode) when statusCode == 404 => DsBotAvailability.missing,
         DshRemoteException(:final code) when code == 'bot/not-found' || code == 'bot/read-only' =>
           DsBotAvailability.outdated,
-        // The relay's allow-list does not carry `dsBot/*` yet.
+        // Keep compatibility with carriers that refuse the hello probe.
         DshRemoteException(:final code) when code == 'METHOD_NOT_ALLOWED' => DsBotAvailability.relay,
         _ => DsBotAvailability.failed,
       };
-      state = state.copyWith(availability: availability, error: () => describeDsBotError(error));
+      state = state.copyWith(
+        availability: availability,
+        error: () => describeDsBotError(error),
+        retainsTranscript: availability == DsBotAvailability.failed && !_rejectsTranscript(error),
+      );
       return;
     }
     if (!_current(generation)) return;
     if (!hello.compatible) {
-      state = state.copyWith(availability: DsBotAvailability.outdated, hello: hello);
+      state = state.copyWith(availability: DsBotAvailability.outdated, hello: hello, retainsTranscript: false);
       return;
     }
     state = state.copyWith(hello: hello, error: () => null);
     await _loadState(generation, full: true);
     if (!_current(generation)) return;
+    if (api.transport is DsBotUnaryTransport) {
+      _noticeBoot = hello.boot.isEmpty ? null : hello.boot;
+      final boot = _noticeBoot;
+      if (boot != null) {
+        final key = _cursorKey;
+        final cursor = await _readCursor(key);
+        if (!_current(generation)) return;
+        if (cursor?.boot != boot) await _writeCursor(key, boot, hello.seq);
+      }
+      if (_current(generation)) _armUnaryPoll(generation);
+      return;
+    }
     final feed = _feed = api.feed();
     _feedSub = feed.events.listen(_onFeed);
     feed.start();
+  }
+
+  void _armUnaryPoll(int generation) {
+    if (!ref.read(appForegroundProvider)) return;
+    _unaryPollTimer ??= Timer(unaryPollEvery, () {
+      _unaryPollTimer = null;
+      if (_current(generation)) unawaited(_pollUnary(generation));
+    });
+  }
+
+  Future<void> _pollUnary(int generation) async {
+    final api = _api;
+    if (!_current(generation) ||
+        api == null ||
+        !ref.read(appForegroundProvider) ||
+        _unaryPollGeneration == generation) {
+      return;
+    }
+    _unaryPollGeneration = generation;
+    try {
+      final boot = _noticeBoot;
+      final key = _cursorKey;
+      final cursor = _cursors[key];
+      if (boot != null && cursor?.boot == boot) {
+        try {
+          final answer = await api.notices(boot: boot, since: cursor!.seq);
+          if (!_current(generation)) return;
+          if (answer.boot != boot) {
+            // Revision and notice sequence numbers are scoped to one plugin boot.
+            retry();
+            return;
+          }
+          if (!answer.reset) {
+            for (final notice in answer.notices) {
+              _acceptNotice(notice, caughtUp: true);
+            }
+          }
+          await _advance(answer.seq);
+          if (_current(generation)) _noticed.clear();
+        } on DshException catch (error) {
+          if (!_current(generation)) return;
+          if (_rejectsTranscript(error)) {
+            _retireTranscript(error);
+            return;
+          }
+          // A missed read leaves the cursor in place for the next poll.
+        }
+      }
+      if (!_current(generation) || !ref.read(appForegroundProvider)) return;
+      await _loadState(generation);
+      if (_current(generation) && state.ready && ref.read(appForegroundProvider)) _visibleRefreshes.add(true);
+    } finally {
+      if (_unaryPollGeneration == generation) _unaryPollGeneration = null;
+      if (_current(generation)) _armUnaryPoll(generation);
+    }
+  }
+
+  bool _markRemoteUnavailable(Object? error) {
+    if (!state.isDshRemote || error is! DshRemoteException) return false;
+    if (!const {'FEATURE_NOT_SUPPORTED', 'METHOD_NOT_ALLOWED', 'METHOD_NOT_FOUND'}.contains(error.code)) return false;
+    _teardown();
+    state = DsBotStatus(
+      availability: DsBotAvailability.relay,
+      host: state.host,
+      hostLabel: state._hostLabel,
+      isLocal: state.isLocal,
+      isDshRemote: true,
+    );
+    return true;
+  }
+
+  void _retireTranscript([Object? error]) {
+    _teardown();
+    state = DsBotStatus(
+      availability: DsBotAvailability.failed,
+      host: state.host,
+      hostLabel: state._hostLabel,
+      isLocal: state.isLocal,
+      isDshRemote: state.isDshRemote,
+      error: error == null ? appL10n.stateHostAuthFailed : describeDsBotError(error),
+    );
   }
 
   Future<void> _loadState(int generation, {bool full = false}) async {
@@ -279,6 +452,11 @@ class DsBotController extends Notifier<DsBotStatus> {
       );
     } catch (error) {
       if (!_current(generation)) return;
+      if (_markRemoteUnavailable(error)) return;
+      if (_rejectsTranscript(error)) {
+        _retireTranscript(error);
+        return;
+      }
       // A team already on screen stays; the next feed event tries again.
       if (state.team == null) {
         state = state.copyWith(availability: DsBotAvailability.failed, error: () => describeDsBotError(error));
@@ -329,13 +507,20 @@ class DsBotController extends Notifier<DsBotStatus> {
       case DsBotFeedNotice(:final notice):
         _acceptNotice(notice, caughtUp: false);
       case DsBotFeedLost(:final error):
+        if (_markRemoteUnavailable(error)) break;
         if (error is DshHttpException && error.statusCode == 404) {
           // A missing mobile feed is a capability failure, not a transient drop.
           // Stop its automatic retry loop; the visible Retry action rechecks it.
           unawaited(_feed?.close());
           _feed = null;
           _teardown();
-          state = state.copyWith(availability: DsBotAvailability.outdated, feedConnected: false);
+          state = state.copyWith(
+            availability: DsBotAvailability.outdated,
+            feedConnected: false,
+            retainsTranscript: false,
+          );
+        } else if (_rejectsTranscript(error)) {
+          _retireTranscript(error);
         } else {
           state = state.copyWith(feedConnected: false);
         }
@@ -457,7 +642,28 @@ class DsBotController extends Notifier<DsBotStatus> {
   Future<void> refresh() => _loadState(_generation);
 
   /// The app came back or the network changed.
-  void kick() => _feed?.kick();
+  void kick() {
+    _feed?.kick();
+    if (state.hello?.compatible != true || _resumeGeneration == _generation) return;
+    unawaited(_resume(_generation));
+  }
+
+  Future<void> _resume(int generation) async {
+    _resumeGeneration = generation;
+    try {
+      // The newest page does not depend on a possibly slow notice catch-up.
+      if (state.ready) _visibleRefreshes.add(false);
+      if (_api?.transport is DsBotUnaryTransport) {
+        _unaryPollTimer?.cancel();
+        _unaryPollTimer = null;
+        await _pollUnary(generation);
+      } else {
+        _scheduleState(delay: Duration.zero);
+      }
+    } finally {
+      if (_resumeGeneration == generation) _resumeGeneration = null;
+    }
+  }
 }
 
 final dsBotProvider = NotifierProvider<DsBotController, DsBotStatus>(DsBotController.new);
@@ -623,13 +829,81 @@ NotifyPost dsBotPost(HostRef host, DsBotNotice notice) {
 
 // ── A Bot's own chat ─────────────────────────────────────────────────────────
 
+typedef _TranscriptScope = ({HostRef host, ReadListIdentity identity, String boot, Object conversation});
+
+/// One mounted conversation owns its last visible rows. A new host, identity,
+/// plugin boot, or conversation discards them before any read can paint them.
+class _VisibleTranscript {
+  _TranscriptScope? _scope;
+  String? title;
+  List<DsBotItem> _items = const [];
+
+  void clear() {
+    _scope = null;
+    title = null;
+    _items = const [];
+  }
+
+  void remember(_TranscriptScope? scope, String name, List<DsBotItem> items) {
+    if (scope == null || items.isEmpty) {
+      clear();
+    } else {
+      _scope = scope;
+      title = name;
+      _items = items;
+    }
+  }
+
+  List<DsBotItem> display(DsBotStatus status, ReadListIdentity? identity, Object? conversation, bool visible) {
+    final scope = _scope;
+    if (!visible ||
+        !status.retainsTranscript ||
+        scope == null ||
+        scope.host != status.host ||
+        scope.identity != identity ||
+        (status.hello != null && scope.boot != status.hello!.boot) ||
+        (status.ready && scope.conversation != conversation)) {
+      clear();
+      return const [];
+    }
+    // Presentation only: omit unfinished rows and references that could fetch
+    // attachments or full text from a connection that has since changed.
+    return [
+      for (final item in _items)
+        if (!item.live)
+          DsBotItem(
+            kind: item.kind,
+            id: item.id,
+            text: item.text,
+            time: item.time,
+            botId: item.botId,
+            name: item.name,
+            color: item.color,
+            event: item.event,
+            code: item.code,
+            role: item.role,
+            roomId: item.roomId,
+            images: item.images,
+            duration: item.duration,
+          ),
+    ];
+  }
+}
+
+_TranscriptScope? _transcriptScope(DsBotStatus status, ReadListIdentity? identity, Object conversation) {
+  final boot = status.hello?.boot;
+  if (!status.ready || !status.retainsTranscript || identity == null || boot == null || boot.isEmpty) return null;
+  return (host: status.host, identity: identity, boot: boot, conversation: conversation);
+}
+
 /// A message sent from here that the chat does not show yet.
 @immutable
 class DsBotPending {
-  const DsBotPending(this.text, this.at, {this.failed = false});
+  const DsBotPending(this.text, this.at, {this.failed = false, this.images = 0});
   final String text;
   final DateTime at;
   final bool failed;
+  final int images;
 }
 
 @immutable
@@ -638,6 +912,7 @@ class BotChatState {
     this.items = const [],
     this.cursor,
     this.loading = true,
+    this.staleTitle,
     this.loadingEarlier = false,
     this.error,
     this.pending = const [],
@@ -648,6 +923,9 @@ class BotChatState {
   final List<DsBotItem> items;
   final Object? cursor;
   final bool loading;
+
+  final String? staleTitle;
+  bool get stale => staleTitle != null;
   final bool loadingEarlier;
   final String? error;
   final List<DsBotPending> pending;
@@ -662,6 +940,7 @@ class BotChatState {
     List<DsBotItem>? items,
     Object? Function()? cursor,
     bool? loading,
+    String? Function()? staleTitle,
     bool? loadingEarlier,
     String? Function()? error,
     List<DsBotPending>? pending,
@@ -671,6 +950,7 @@ class BotChatState {
     items: items ?? this.items,
     cursor: cursor == null ? this.cursor : cursor(),
     loading: loading ?? this.loading,
+    staleTitle: staleTitle == null ? this.staleTitle : staleTitle(),
     loadingEarlier: loadingEarlier ?? this.loadingEarlier,
     error: error == null ? this.error : error(),
     pending: pending ?? this.pending,
@@ -681,15 +961,15 @@ class BotChatState {
 
 /// Drops pending sends the chat now shows (the same text, from the user).
 List<DsBotPending> settlePending(List<DsBotPending> pending, Iterable<DsBotItem> shown) {
-  final texts = [
+  final messages = [
     for (final item in shown)
-      if (item.kind == DsBotItemKind.user) item.text.trim(),
+      if (item.kind == DsBotItemKind.user) (item.text.trim(), item.images),
   ];
   final left = <DsBotPending>[];
   for (final entry in pending) {
-    final at = texts.indexOf(entry.text.trim());
+    final at = messages.indexOf((entry.text.trim(), entry.images));
     if (at >= 0 && !entry.failed) {
-      texts.removeAt(at);
+      messages.removeAt(at);
     } else {
       left.add(entry);
     }
@@ -702,6 +982,7 @@ class BotChatController extends Notifier<BotChatState> {
   BotChatController(this.botId);
 
   final String botId;
+  final _transcript = _VisibleTranscript();
   String? _attempt;
   List<({String sessionId, DsBotItem item})>? _liveDuringLoad;
   int _load = 0;
@@ -715,28 +996,77 @@ class BotChatController extends Notifier<BotChatState> {
   @override
   BotChatState build() {
     final hub = ref.watch(dsBotProvider.notifier);
-    ref.watch(dsBotProvider.select((s) => (s.host, s.hello?.boot)));
-    // A new part of the chat starts it over.
-    ref.watch(dsBotProvider.select((s) => s.team?.bot(botId)?.sessionId));
+    final identity = ref.watch(readListIdentityProvider);
+    ref.watch(dsBotProvider.select((s) => (s.host, s.hello?.boot, s.ready, s.retainsTranscript, hub.api)));
+    // New parts must never reuse the previous part's paused display.
+    final part = ref.watch(dsBotProvider.select((s) => s.team?.bot(botId)?.sessionId));
+    final status = ref.read(dsBotProvider);
+    final visible = ref.read(dsBotViewingProvider) == botId;
+    final items = _transcript.display(status, identity, part, visible);
+    ref.listen(dsBotViewingProvider, (_, next) {
+      if (next == botId && !state.stale) _remember();
+      if (next != botId) {
+        _transcript.clear();
+        if (state.stale) state = const BotChatState();
+      }
+    });
     final generation = ++_generation;
     _attempt = null;
     _liveDuringLoad = null;
     final sub = hub.events.listen((event) {
       if (_current(generation)) _onEvent(event);
     });
+    final refreshes = hub.visibleRefreshes.listen((unary) {
+      if (_current(generation) &&
+          ref.read(dsBotViewingProvider) == botId &&
+          (!unary || _liveDuringLoad == null && !state.loadingEarlier)) {
+        if (!unary) _markStale();
+        unawaited(reload(unary: unary));
+      }
+    });
     ref.onDispose(() {
       _generation++;
       unawaited(sub.cancel());
+      unawaited(refreshes.cancel());
     });
     scheduleMicrotask(() {
       if (_current(generation)) unawaited(reload());
     });
-    return const BotChatState();
+    return BotChatState(items: items, staleTitle: items.isEmpty ? null : _transcript.title);
   }
 
-  Future<void> reload() async {
+  void _remember() {
+    if (ref.read(dsBotViewingProvider) != botId || state.stale) return;
+    final status = ref.read(dsBotProvider);
+    final bot = status.team?.bot(botId);
+    final scope = bot == null ? null : _transcriptScope(status, ref.read(readListIdentityProvider), bot.sessionId);
+    _transcript.remember(scope, bot?.name ?? '', state.items);
+  }
+
+  void _markStale() {
+    if (state.stale || ref.read(dsBotViewingProvider) != botId) return;
+    final status = ref.read(dsBotProvider);
+    final conversation = status.team?.bot(botId)?.sessionId;
+    final items = _transcript.display(status, ref.read(readListIdentityProvider), conversation, true);
+    if (items.isEmpty) return;
+    _load++;
+    _earlier++;
+    _liveDuringLoad = null;
+    state = BotChatState(items: items, staleTitle: _transcript.title);
+  }
+
+  void _rejectPage(Object error) {
+    _transcript.clear();
+    state = BotChatState(loading: false, error: describeDsBotError(error));
+    if (error is DshCarrierRefusedException || error is DshHttpException && error.statusCode != 404) {
+      ref.read(dsBotProvider.notifier)._retireTranscript(error);
+    }
+  }
+
+  Future<void> reload({bool unary = false}) async {
     final api = _api;
-    if (api == null) return;
+    final status = ref.read(dsBotProvider);
+    if (api == null || !status.ready || status.team?.bot(botId) == null) return;
     final generation = _generation;
     final load = ++_load;
     final live = <({String sessionId, DsBotItem item})>[];
@@ -755,17 +1085,26 @@ class BotChatController extends Notifier<BotChatState> {
           items.add(update.item);
         }
       }
+      final merged = unary && !state.stale && page.sessionId == state.sessionId && items.isNotEmpty
+          ? mergeNewestPage(state.items, items)
+          : (items: items, joined: false);
       state = state.copyWith(
-        items: items,
-        cursor: () => page.cursor,
+        items: merged.items,
+        cursor: merged.joined ? null : () => page.cursor,
         loading: false,
+        staleTitle: () => null,
         error: () => null,
         sessionId: page.sessionId,
         pending: settlePending(state.pending, items),
       );
+      _remember();
     } catch (error) {
       if (!_current(generation) || load != _load) return;
-      state = state.copyWith(loading: false, error: () => describeDsBotError(error));
+      if (_rejectsTranscript(error)) {
+        _rejectPage(error);
+      } else {
+        state = state.copyWith(loading: false, error: () => describeDsBotError(error));
+      }
     } finally {
       if (identical(_liveDuringLoad, live)) _liveDuringLoad = null;
     }
@@ -774,7 +1113,7 @@ class BotChatController extends Notifier<BotChatState> {
   Future<void> loadEarlier() async {
     final api = _api;
     final cursor = state.cursor;
-    if (api == null || cursor == null || state.loadingEarlier) return;
+    if (api == null || cursor == null || state.stale || state.loadingEarlier) return;
     final generation = _generation;
     final load = _load;
     final earlier = ++_earlier;
@@ -782,10 +1121,23 @@ class BotChatController extends Notifier<BotChatState> {
     try {
       final page = await api.chat(botId, cursor: cursor);
       if (!_current(generation) || load != _load || earlier != _earlier) return;
-      state = state.copyWith(items: [...page.items, ...state.items], cursor: () => page.cursor, loadingEarlier: false);
+      if (page.sessionId == state.sessionId) {
+        state = state.copyWith(
+          items: [...page.items, ...state.items],
+          cursor: () => page.cursor,
+          loadingEarlier: false,
+        );
+        _remember();
+      } else {
+        await reload();
+      }
     } catch (error) {
       if (!_current(generation) || load != _load || earlier != _earlier) return;
-      state = state.copyWith(loadingEarlier: false, error: () => describeDsBotError(error));
+      if (_rejectsTranscript(error)) {
+        _rejectPage(error);
+      } else {
+        state = state.copyWith(loadingEarlier: false, error: () => describeDsBotError(error));
+      }
     }
   }
 
@@ -794,25 +1146,28 @@ class BotChatController extends Notifier<BotChatState> {
       case DsBotFeedLost():
         _attempt = null;
         state = state.copyWith(streaming: () => null);
+        _markStale();
       case DsBotFeedHello():
         _attempt = null;
         state = state.copyWith(streaming: () => null);
         // Entries may have been missed while the feed was away.
-        if (!state.loading) unawaited(reload());
+        if (_liveDuringLoad == null) unawaited(reload());
       case DsBotFeedMessage(botId: final id, :final sessionId, :final item) when id == botId:
         if (state.sessionId != null && sessionId != state.sessionId) {
           unawaited(reload());
           return;
         }
-        if (state.items.any((other) => other.sameAs(item))) return;
+        if (!state.stale && state.items.any((other) => other.sameAs(item))) return;
         _liveDuringLoad?.add((sessionId: sessionId, item: item));
+        if (state.stale) return;
         state = state.copyWith(
           items: [...state.items, item],
           pending: settlePending(state.pending, [item]),
           streaming: item.kind == DsBotItemKind.bot ? () => null : null,
         );
+        _remember();
       case DsBotFeedStream(botId: final id, :final sessionId, :final attemptId, :final phase, :final text)
-          when id == botId:
+          when id == botId && !state.stale:
         final currentSession = state.sessionId ?? ref.read(dsBotProvider).team?.bot(botId)?.sessionId;
         if (currentSession != null && sessionId != currentSession) return;
         if (phase == 'start') {
@@ -830,16 +1185,23 @@ class BotChatController extends Notifier<BotChatState> {
 
   /// Sends [text]; it shows at once and leaves the pending list when the
   /// chat echoes it.
-  Future<bool> send(String text) async {
+  Future<bool> send(String text, {List<String> images = const []}) async {
     final api = _api;
     final trimmed = text.trim();
-    if (api == null || trimmed.isEmpty) return false;
+    final status = ref.read(dsBotProvider);
+    if (api == null ||
+        !status.ready ||
+        status.team?.bot(botId) == null ||
+        state.stale ||
+        (trimmed.isEmpty && images.isEmpty)) {
+      return false;
+    }
     final generation = _generation;
-    final entry = DsBotPending(trimmed, DateTime.now());
+    final entry = DsBotPending(trimmed, DateTime.now(), images: images.length);
     state = state.copyWith(pending: [...state.pending, entry], error: () => null);
     try {
-      await api.send(botId, trimmed);
-      return true;
+      await api.send(botId, trimmed, images: images);
+      return _current(generation);
     } catch (error) {
       if (!_current(generation)) return false;
       state = state.copyWith(
@@ -868,6 +1230,7 @@ class RoomChatState {
     this.items = const [],
     this.cursor,
     this.loading = true,
+    this.staleTitle,
     this.loadingEarlier = false,
     this.running = false,
     this.speaking,
@@ -878,6 +1241,9 @@ class RoomChatState {
   final List<DsBotItem> items;
   final Object? cursor;
   final bool loading;
+
+  final String? staleTitle;
+  bool get stale => staleTitle != null;
   final bool loadingEarlier;
   final bool running;
   final String? speaking;
@@ -890,6 +1256,7 @@ class RoomChatState {
     List<DsBotItem>? items,
     Object? Function()? cursor,
     bool? loading,
+    String? Function()? staleTitle,
     bool? loadingEarlier,
     bool? running,
     String? Function()? speaking,
@@ -899,6 +1266,7 @@ class RoomChatState {
     items: items ?? this.items,
     cursor: cursor == null ? this.cursor : cursor(),
     loading: loading ?? this.loading,
+    staleTitle: staleTitle == null ? this.staleTitle : staleTitle(),
     loadingEarlier: loadingEarlier ?? this.loadingEarlier,
     running: running ?? this.running,
     speaking: speaking == null ? this.speaking : speaking(),
@@ -924,7 +1292,9 @@ class RoomChatController extends Notifier<RoomChatState> {
   RoomChatController(this.roomId);
 
   final String roomId;
+  final _transcript = _VisibleTranscript();
   Timer? _poll;
+  bool _pollNeeded = false;
   int _load = 0;
   int _earlier = 0;
   bool _again = false;
@@ -941,23 +1311,79 @@ class RoomChatController extends Notifier<RoomChatState> {
   @override
   RoomChatState build() {
     final hub = ref.watch(dsBotProvider.notifier);
-    ref.watch(dsBotProvider.select((s) => (s.host, s.hello?.boot)));
+    final identity = ref.watch(readListIdentityProvider);
+    ref.watch(dsBotProvider.select((s) => (s.host, s.hello?.boot, s.ready, s.retainsTranscript, hub.api)));
+    final conversation = ref.watch(dsBotProvider.select((s) => _roomIdentity(s.team?.room(roomId))));
+    final status = ref.read(dsBotProvider);
+    final visible = ref.read(dsBotViewingProvider) == roomId;
+    final items = _transcript.display(status, identity, conversation, visible);
+    ref.listen(dsBotViewingProvider, (_, next) {
+      if (next == roomId && !state.stale) _remember();
+      if (next != roomId) {
+        _transcript.clear();
+        if (state.stale) state = const RoomChatState();
+      }
+    });
     final generation = ++_generation;
     _again = false;
     _busyGeneration = null;
     final sub = hub.events.listen((event) {
       if (_current(generation)) _onEvent(event);
     });
+    final refreshes = hub.visibleRefreshes.listen((unary) {
+      if (_current(generation) &&
+          ref.read(dsBotViewingProvider) == roomId &&
+          (!unary || _busyGeneration == null && !state.loadingEarlier)) {
+        if (!unary) _markStale();
+        unawaited(refresh());
+      }
+    });
     ref.onDispose(() {
       _generation++;
       _poll?.cancel();
       _poll = null;
+      _pollNeeded = false;
       unawaited(sub.cancel());
+      unawaited(refreshes.cancel());
     });
     scheduleMicrotask(() {
       if (_current(generation)) unawaited(refresh());
     });
-    return const RoomChatState();
+    return RoomChatState(items: items, staleTitle: items.isEmpty ? null : _transcript.title);
+  }
+
+  static (String?, DateTime?)? _roomIdentity(DsBotRoom? room) => room == null ? null : (room.sessionId, room.createdAt);
+
+  void _remember() {
+    if (ref.read(dsBotViewingProvider) != roomId || state.stale) return;
+    final status = ref.read(dsBotProvider);
+    final room = status.team?.room(roomId);
+    final conversation = _roomIdentity(room);
+    final scope = conversation == null
+        ? null
+        : _transcriptScope(status, ref.read(readListIdentityProvider), conversation);
+    _transcript.remember(scope, room?.name ?? '', state.items);
+  }
+
+  void _markStale() {
+    if (state.stale || ref.read(dsBotViewingProvider) != roomId) return;
+    final status = ref.read(dsBotProvider);
+    final conversation = _roomIdentity(status.team?.room(roomId));
+    final items = _transcript.display(status, ref.read(readListIdentityProvider), conversation, true);
+    if (items.isEmpty) return;
+    _load++;
+    _earlier++;
+    _busyGeneration = null;
+    _again = false;
+    state = RoomChatState(items: items, staleTitle: _transcript.title);
+  }
+
+  void _rejectPage(Object error) {
+    _transcript.clear();
+    state = RoomChatState(loading: false, error: describeDsBotError(error));
+    if (error is DshCarrierRefusedException || error is DshHttpException && error.statusCode != 404) {
+      ref.read(dsBotProvider.notifier)._retireTranscript(error);
+    }
   }
 
   void _onEvent(DsBotFeedEvent event) {
@@ -965,7 +1391,8 @@ class RoomChatController extends Notifier<RoomChatState> {
       case DsBotFeedLost():
         // A connected feed may have outlived the one-shot fallback timer.
         // Repeated failed reconnects must not postpone an existing poll.
-        if (state.running && _poll?.isActive != true) _armPoll(true);
+        if (_poll?.isActive != true && (_pollNeeded || state.running)) _armPoll(true);
+        _markStale();
       case DsBotFeedRoom(roomId: final id) when id == roomId:
         unawaited(refresh());
       case DsBotFeedHello():
@@ -978,7 +1405,8 @@ class RoomChatController extends Notifier<RoomChatState> {
   /// Reads the newest page and merges it.
   Future<void> refresh() async {
     final api = _api;
-    if (api == null) return;
+    final status = ref.read(dsBotProvider);
+    if (api == null || !status.ready || status.team?.room(roomId) == null) return;
     final generation = _generation;
     if (_busyGeneration == generation) {
       _again = true;
@@ -991,23 +1419,32 @@ class RoomChatController extends Notifier<RoomChatState> {
     try {
       final page = await api.roomChat(roomId);
       if (!_current(generation) || load != _load) return;
-      final merged = mergeNewestPage(state.items, page.items);
+      if (page.roomId != roomId) throw const DshProtocolException('room-chat response has the wrong room ID');
+      final merged = state.stale || page.items.isEmpty
+          ? (items: page.items, joined: false)
+          : mergeNewestPage(state.items, page.items);
       state = state.copyWith(
         items: merged.items,
         cursor: merged.joined && state.items.isNotEmpty ? null : () => page.cursor,
         loading: false,
+        staleTitle: () => null,
         running: page.running,
         speaking: () => page.speaking,
         error: () => null,
         pending: settlePending(state.pending, page.items),
       );
+      _remember();
       _armPoll(page.running);
     } catch (error) {
       if (!_current(generation) || load != _load) return;
-      state = state.copyWith(loading: false, error: () => describeDsBotError(error));
-      _armPoll(state.running);
+      if (_rejectsTranscript(error)) {
+        _rejectPage(error);
+      } else {
+        state = state.copyWith(loading: false, error: () => describeDsBotError(error));
+        _armPoll(_pollNeeded || state.running);
+      }
     } finally {
-      if (_busyGeneration == generation) {
+      if (_busyGeneration == generation && load == _load) {
         _busyGeneration = null;
         if (_again && _current(generation)) {
           _again = false;
@@ -1018,9 +1455,10 @@ class RoomChatController extends Notifier<RoomChatState> {
   }
 
   void _armPoll(bool running) {
+    _pollNeeded = running;
     _poll?.cancel();
     _poll = null;
-    if (!running) return;
+    if (!running || _api?.transport is DsBotUnaryTransport) return;
     final generation = _generation;
     _poll = Timer(pollEvery, () {
       if (_current(generation) && !ref.read(dsBotProvider).feedConnected) unawaited(refresh());
@@ -1030,7 +1468,7 @@ class RoomChatController extends Notifier<RoomChatState> {
   Future<void> loadEarlier() async {
     final api = _api;
     final cursor = state.cursor;
-    if (api == null || cursor == null || state.loadingEarlier) return;
+    if (api == null || cursor == null || state.stale || state.loadingEarlier) return;
     final generation = _generation;
     final load = _load;
     final earlier = ++_earlier;
@@ -1038,23 +1476,36 @@ class RoomChatController extends Notifier<RoomChatState> {
     try {
       final page = await api.roomChat(roomId, cursor: cursor);
       if (!_current(generation) || load != _load || earlier != _earlier) return;
+      if (page.roomId != roomId) throw const DshProtocolException('room-chat response has the wrong room ID');
       state = state.copyWith(items: [...page.items, ...state.items], cursor: () => page.cursor, loadingEarlier: false);
+      _remember();
     } catch (error) {
       if (!_current(generation) || load != _load || earlier != _earlier) return;
-      state = state.copyWith(loadingEarlier: false, error: () => describeDsBotError(error));
+      if (_rejectsTranscript(error)) {
+        _rejectPage(error);
+      } else {
+        state = state.copyWith(loadingEarlier: false, error: () => describeDsBotError(error));
+      }
     }
   }
 
-  Future<bool> send(String text) async {
+  Future<bool> send(String text, {List<String> images = const []}) async {
     final api = _api;
     final trimmed = text.trim();
-    if (api == null || trimmed.isEmpty) return false;
+    final status = ref.read(dsBotProvider);
+    if (api == null ||
+        !status.ready ||
+        status.team?.room(roomId) == null ||
+        state.stale ||
+        (trimmed.isEmpty && images.isEmpty)) {
+      return false;
+    }
     final generation = _generation;
-    final entry = DsBotPending(trimmed, DateTime.now());
+    final entry = DsBotPending(trimmed, DateTime.now(), images: images.length);
     state = state.copyWith(pending: [...state.pending, entry], error: () => null);
     try {
-      await api.send(roomId, trimmed);
-      return true;
+      await api.send(roomId, trimmed, images: images);
+      return _current(generation);
     } catch (error) {
       if (!_current(generation)) return false;
       state = state.copyWith(

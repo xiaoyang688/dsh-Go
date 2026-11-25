@@ -198,6 +198,7 @@ class DshConnection {
     Uri baseUri, {
     this.hostHeader,
     this.cookie,
+    this.strictHttps = false,
     HttpClient? httpClient,
     this.connectTimeout = const Duration(seconds: 10),
     this.requestTimeout = const Duration(seconds: 120),
@@ -207,6 +208,18 @@ class DshConnection {
        _ownsClient = httpClient == null,
        _usesDefaultHttp = httpClient == null && HttpOverrides.current == null,
        _tracer = tracer {
+    if (strictHttps &&
+        (baseUri.scheme != 'https' ||
+            baseUri.host.isEmpty ||
+            baseUri.userInfo.isNotEmpty ||
+            baseUri.hasQuery ||
+            baseUri.hasFragment ||
+            hostHeader != null ||
+            httpClient != null ||
+            !_validMountPath(baseUri))) {
+      if (_ownsClient) _http.close(force: true);
+      throw ArgumentError('Expected a dedicated HTTPS origin and mount path');
+    }
     if (_ownsClient) {
       _http
         ..connectionTimeout = connectTimeout
@@ -220,6 +233,7 @@ class DshConnection {
 
   /// Overrides the `Host` header (`host:port`); defaults to [baseUri]'s authority.
   final String? hostHeader;
+  final bool strictHttps;
   final Duration connectTimeout;
   final Duration requestTimeout;
   DshTracer? _tracer;
@@ -238,7 +252,12 @@ class DshConnection {
   /// True only for the unmodified stock transport without a tracer or custom
   /// HttpClient/HttpOverrides. Custom behavior continues through postJson.
   bool get canReadSessionsInBackground =>
-      runtimeType == DshConnection && _usesDefaultHttp && !_closed && tracer == null && HttpOverrides.current == null;
+      !strictHttps &&
+      runtimeType == DshConnection &&
+      _usesDefaultHttp &&
+      !_closed &&
+      tracer == null &&
+      HttpOverrides.current == null;
 
   /// Explicit opt-in used by the HTTP client. A worker owns this read's entire
   /// HTTP chain and decode; closing this connection retires its pending reads.
@@ -277,10 +296,26 @@ class DshConnection {
 
   Uri resolve(String path, [Map<String, String>? query]) {
     final normalized = path.startsWith('/') ? path : '/$path';
-    return baseUri.replace(
+    final uri = baseUri.replace(
       path: '${baseUri.path}$normalized',
       queryParameters: (query == null || query.isEmpty) ? null : query,
     );
+    _checkHttpsTarget(uri);
+    return uri;
+  }
+
+  static bool _validMountPath(Uri uri) => !uri.pathSegments.any(
+    (segment) => segment == '.' || segment == '..' || segment.contains('/') || segment.contains('\\'),
+  );
+
+  void _checkHttpsTarget(Uri uri) {
+    if (!strictHttps) return;
+    if (uri.origin != baseUri.origin || !_validMountPath(uri) || !uri.path.startsWith('${baseUri.path}/')) {
+      throw const DshProtocolException('Request is outside the dedicated HTTPS mount');
+    }
+    if (cookie != null && cookie!.authority != authority) {
+      throw const DshProtocolException('Session cookie belongs to another HTTPS origin');
+    }
   }
 
   /// The address to dial for [url] when it names this engine, by the address
@@ -471,6 +506,7 @@ class DshConnection {
     required bool autoUncompress,
     required Duration timeout,
   }) async {
+    _checkHttpsTarget(uri);
     if (maxBytes < 1) throw ArgumentError.value(maxBytes, 'maxBytes');
     final http = HttpClient()
       ..connectionTimeout = connectTimeout
@@ -533,7 +569,11 @@ class DshConnection {
     final uri = webSocketUri(path);
     var abandoned = false;
     try {
-      return await WebSocket.connect(uri.toString(), headers: headers, customClient: _http)
+      return await WebSocket.connect(
+            uri.toString(),
+            headers: headers,
+            customClient: strictHttps ? _NoRedirectHttpClient(_http) : _http,
+          )
           .then((socket) {
             // A timeout does not cancel the upgrade. Own a late socket until it
             // can be handed to the caller; closing HttpClient cannot reclaim it.
@@ -590,6 +630,7 @@ class DshConnection {
     Duration? timeout,
     DshHttpAbort? abort,
   }) async {
+    _checkHttpsTarget(uri);
     if (abort?.isAborted == true) throw const DshClosedException('HTTP request cancelled');
     HttpClientRequest? request;
     StreamIterator<List<int>>? responseBody;
@@ -624,7 +665,7 @@ class DshConnection {
         req.abort(const DshClosedException('HTTP request cancelled'));
         throw const DshClosedException('HTTP request cancelled');
       }
-      req.followRedirects = followRedirects;
+      req.followRedirects = !strictHttps && followRedirects;
       _applyHost(req.headers);
       if (cookie != null) req.headers.set(HttpHeaders.cookieHeader, cookie!.header);
       if (contentType != null) req.headers.set(HttpHeaders.contentTypeHeader, contentType);
@@ -735,6 +776,21 @@ class DshConnection {
     }
     return DshCookie(name: name, value: value, authority: authority, expiresAt: expiresAt);
   }
+}
+
+// dart:io's WebSocket connector opens the upgrade through this client.
+final class _NoRedirectHttpClient implements HttpClient {
+  _NoRedirectHttpClient(this._inner);
+  final HttpClient _inner;
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async {
+    final request = await _inner.openUrl(method, url);
+    return request..followRedirects = false;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// One response owns its reader and cancellation for the complete body

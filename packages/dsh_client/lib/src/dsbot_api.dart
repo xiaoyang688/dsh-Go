@@ -32,6 +32,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'carrier.dart';
 import 'connection.dart';
@@ -187,6 +188,44 @@ class DsBotHttpTransport implements DsBotTransport {
   Future<void> close() async {
     if (_ownsClient) _http.close(force: true);
   }
+}
+
+/// A carrier that can provide the fixed unary Bot route on its live tunnel.
+abstract interface class DsBotUnaryCarrier {
+  DsBotUnaryTransport? openDsBotUnaryTransport();
+}
+
+/// One authenticated, POST-only `api/bot` route. The tunnel supplies a call
+/// pinned to its current connection; there is no corresponding feed route.
+class DsBotUnaryTransport implements DsBotTransport {
+  DsBotUnaryTransport(this._post);
+
+  final Future<Object?> Function(String endpoint, Map<String, Object?> payload, Duration? timeout) _post;
+
+  @override
+  Future<Object?> call(String endpoint, Map<String, Object?> payload, {Duration? timeout}) async {
+    final answer = asMap(await _post(endpoint, payload, timeout));
+    final status = asInt(answer?['status']);
+    if (status == null || status < 100 || status > 599) {
+      throw const DshProtocolException('api/bot: malformed tunnel route response');
+    }
+    if (status != 200) {
+      throw DshHttpException(status, 'HTTP $status from api/bot');
+    }
+    final decoded = asMap(answer?['json']);
+    if (decoded == null || decoded['ok'] is! bool) {
+      throw DshProtocolException('api/bot $endpoint: not a DS Bot answer');
+    }
+    if (decoded['ok'] == true) return decoded['value'];
+    throw DshRemoteException.fromJson(decoded['error']);
+  }
+
+  @override
+  Stream<DsBotSseEvent> openFeed() =>
+      Stream.error(const DshRemoteException('FEATURE_NOT_SUPPORTED', 'This DS Bot route supports unary calls only.'));
+
+  @override
+  Future<void> close() async {}
 }
 
 /// [DsBotTransport] over the Host's Remote methods `dsBot/call` and the
@@ -348,6 +387,16 @@ class DsBotHello {
 
   bool get compatible => api != null;
   bool supports(String capability) => capabilities.contains(capability);
+
+  /// The goal operations shipped by DS Bot 0.3.8 are not advertised by `hello`.
+  bool get supportsRoomGoals {
+    final version = RegExp(r'^(\d+)\.(\d+)\.(\d+)(?:\+.*)?$').firstMatch(pluginVersion);
+    if (version == null) return false;
+    final major = int.parse(version[1]!);
+    final minor = int.parse(version[2]!);
+    final patch = int.parse(version[3]!);
+    return major > 0 || minor > 3 || minor == 3 && patch >= 8;
+  }
 }
 
 /// A Bot as `state` lists it.
@@ -369,6 +418,7 @@ class DsBot {
     this.createdAt,
     this.createdBy,
     this.workDir,
+    this.engine,
   }) : sessionId = sessionId ?? id;
 
   factory DsBot.fromJson(Object? json) {
@@ -394,6 +444,7 @@ class DsBot {
       createdAt: asEpochMs(map['createdAt']),
       createdBy: asString(map['createdBy']),
       workDir: asString(map['workDir']),
+      engine: asString(map['engine']),
     );
   }
 
@@ -428,6 +479,9 @@ class DsBot {
   final String? createdBy;
   final String? workDir;
 
+  /// Local agent CLI route, present only for Bots backed by an external agent.
+  final String? engine;
+
   /// The color it shows in: the picked one, else the one its id picks.
   String get ink => dsBotIsColor(color) ? dsBotCurrentColor(color!) : dsBotDefaultColor(id);
 
@@ -435,11 +489,76 @@ class DsBot {
   String? get modelRef => model ?? appliedModel;
 }
 
+/// User controls accepted by DS Bot's `goal-control` operation.
+enum DsBotGoalAction { pause, resume, stop, clear }
+
+enum DsBotGoalStatus { drafting, active, paused, complete, stopped }
+
+/// The current staged goal published in `state.rooms[].goal`.
+class DsBotRoomGoal {
+  DsBotRoomGoal._(Map<String, Object?> map, this.id, this.status)
+    : title = asString(map['title']) ?? '',
+      brief = asString(map['brief']),
+      objective = asString(map['objective']),
+      acceptance = asString(map['acceptance']),
+      constraints = asStringList(map['constraints']),
+      summary = asString(map['summary']),
+      evidence = asString(map['evidence']),
+      reason = asString(map['reason']),
+      idle = asBool(map['idle']) ?? false,
+      current = asInt(map['current']) ?? -1,
+      stages = [for (final stage in asListOrEmpty(map['stages'])) DsBotGoalStage._(asMapOrEmpty(stage))];
+
+  static DsBotRoomGoal? fromJson(Object? json) {
+    final map = asMapOrEmpty(json);
+    final id = asString(map['id']);
+    final status = DsBotGoalStatus.values.where((status) => status.name == map['status']).firstOrNull;
+    return id == null || id.isEmpty || status == null ? null : DsBotRoomGoal._(map, id, status);
+  }
+
+  final String id;
+  final DsBotGoalStatus status;
+  final String title;
+  final String? brief;
+  final String? objective;
+  final String? acceptance;
+  final List<String> constraints;
+  final String? summary;
+  final String? evidence;
+  final String? reason;
+  final bool idle;
+  final int current;
+  final List<DsBotGoalStage> stages;
+}
+
+class DsBotGoalStage {
+  DsBotGoalStage._(Map<String, Object?> map)
+    : title = asString(map['title']) ?? '',
+      acceptance = asString(map['acceptance']),
+      status = asString(map['status']),
+      evidence = asString(map['evidence']),
+      feedback = asString(map['feedback']),
+      tasks = [
+        for (final task in asListOrEmpty(map['tasks']))
+          if (asMap(task) case final item?)
+            if (asString(item['botId']) case final botId?)
+              if (asString(item['task']) case final text?) (botId: botId, text: text, status: asString(item['status'])),
+      ];
+
+  final String title;
+  final String? acceptance;
+  final String? status;
+  final String? evidence;
+  final String? feedback;
+  final List<({String botId, String text, String? status})> tasks;
+}
+
 /// A group chat.
 class DsBotRoom {
   const DsBotRoom({
     required this.id,
     required this.name,
+    this.sessionId,
     this.members = const [],
     this.admin,
     this.mode = 'admin',
@@ -451,6 +570,7 @@ class DsBotRoom {
     this.createdAt,
     this.workDir,
     this.parts = const [],
+    this.goal,
   });
 
   factory DsBotRoom.fromJson(Object? json) {
@@ -458,6 +578,7 @@ class DsBotRoom {
     return DsBotRoom(
       id: asString(map['id']) ?? '',
       name: asString(map['name']) ?? '',
+      sessionId: asString(map['sessionId']),
       members: asStringList(map['members']),
       admin: asString(map['admin']),
       mode: asString(map['mode']) ?? 'admin',
@@ -472,11 +593,14 @@ class DsBotRoom {
       createdAt: asEpochMs(map['createdAt']),
       workDir: asString(map['workDir']),
       parts: asStringList(map['parts']),
+      goal: DsBotRoomGoal.fromJson(map['goal']),
     );
   }
 
   final String id;
   final String name;
+  final String? sessionId;
+  final DsBotRoomGoal? goal;
   final List<String> members;
   final String? admin;
 
@@ -718,6 +842,132 @@ class DsBotLive {
   bool isWorking(String botId) => bots.containsKey(botId);
 }
 
+typedef DsBotLayoutFolder = ({String id, String name, String? parentId});
+typedef DsBotLayoutBot = ({String botId, String? folderId});
+
+/// The Go organization stored by the host. Each array gives sibling order;
+/// Bots and rooms omitted by the host are shown in their usual list order.
+class DsBotGoLayout {
+  DsBotGoLayout({
+    required this.revision,
+    required Iterable<DsBotLayoutFolder> folders,
+    required Iterable<DsBotLayoutBot> bots,
+    required Iterable<String> rooms,
+  }) : folders = List.unmodifiable(folders),
+       bots = List.unmodifiable(bots),
+       rooms = List.unmodifiable(rooms);
+
+  static const maxFolders = 128;
+  static const maxItems = 1024;
+  static const maxDepth = 8;
+  static const maxNameLength = 80;
+  static final _folderId = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
+  static final _control = RegExp(r'[\x00-\x1f\x7f-\x9f]');
+
+  static bool validFolderName(String name) =>
+      name.trim().isNotEmpty && name.trim().runes.length <= maxNameLength && !_control.hasMatch(name);
+
+  final int revision;
+  final List<DsBotLayoutFolder> folders;
+  final List<DsBotLayoutBot> bots;
+  final List<String> rooms;
+
+  /// An absent or invalid layout does not advertise support. The tunnel uses
+  /// [exact] to reject any fields outside this operation's narrow schema.
+  static DsBotGoLayout? parse(Object? json, {bool exact = false}) {
+    final map = asMap(json);
+    if (map == null || (exact && map.length != 4)) return null;
+    final revision = map['revision'];
+    final folders = map['folders'];
+    final bots = map['bots'];
+    final rooms = map['rooms'];
+    if (revision is! int ||
+        revision < 0 ||
+        revision > 9007199254740991 ||
+        folders is! List ||
+        folders.length > maxFolders ||
+        bots is! List ||
+        bots.length > maxItems ||
+        rooms is! List ||
+        rooms.length > maxItems) {
+      return null;
+    }
+
+    final folderMap = <String, DsBotLayoutFolder>{};
+    for (final value in folders) {
+      final item = asMap(value);
+      if (item == null || (exact && item.length != 3)) return null;
+      final id = item['id'];
+      final name = item['name'];
+      final parent = item['parentId'];
+      if (id is! String ||
+          !_folderId.hasMatch(id) ||
+          folderMap.containsKey(id) ||
+          name is! String ||
+          !validFolderName(name) ||
+          !item.containsKey('parentId') ||
+          (parent != null && parent is! String)) {
+        return null;
+      }
+      folderMap[id] = (id: id, name: name.trim(), parentId: parent as String?);
+    }
+    for (final folder in folderMap.values) {
+      var parent = folder.parentId;
+      var depth = 1;
+      while (parent != null) {
+        final ancestor = folderMap[parent];
+        if (ancestor == null || ++depth > maxDepth) return null;
+        parent = ancestor.parentId;
+      }
+    }
+
+    final botMap = <String, DsBotLayoutBot>{};
+    for (final value in bots) {
+      final item = asMap(value);
+      if (item == null || (exact && item.length != 2)) return null;
+      final id = item['botId'];
+      final folder = item['folderId'];
+      if (id is! String ||
+          id.isEmpty ||
+          id.length > 256 ||
+          botMap.containsKey(id) ||
+          !item.containsKey('folderId') ||
+          (folder != null && !folderMap.containsKey(folder))) {
+        return null;
+      }
+      botMap[id] = (botId: id, folderId: folder as String?);
+    }
+    final roomIds = <String>{};
+    for (final value in rooms) {
+      final item = asMap(value);
+      if (item == null || (exact && item.length != 2)) return null;
+      final id = item['roomId'];
+      if (id is! String ||
+          id.isEmpty ||
+          id.length > 256 ||
+          !item.containsKey('folderId') ||
+          item['folderId'] != null ||
+          !roomIds.add(id)) {
+        return null;
+      }
+    }
+    return DsBotGoLayout(revision: revision, folders: folderMap.values, bots: botMap.values, rooms: roomIds);
+  }
+
+  JsonMap toJson() => {
+    'revision': revision,
+    'folders': [
+      for (final f in folders) {'id': f.id, 'name': f.name, 'parentId': f.parentId},
+    ],
+    'bots': [
+      for (final b in bots) {'botId': b.botId, 'folderId': b.folderId},
+    ],
+    'rooms': [
+      for (final id in rooms) {'roomId': id, 'folderId': null},
+    ],
+  };
+}
+
 /// The team as `state` answers it.
 class DsBotTeam {
   const DsBotTeam({
@@ -732,6 +982,7 @@ class DsBotTeam {
     this.modelsKey,
     this.memory = true,
     this.readOnly,
+    this.goLayout,
   });
 
   factory DsBotTeam.fromJson(JsonMap map) => DsBotTeam(
@@ -748,6 +999,7 @@ class DsBotTeam {
     modelsKey: asString(map['modelsKey']),
     memory: asBool(map['memory']) ?? true,
     readOnly: asString(map['readOnly']),
+    goLayout: DsBotGoLayout.parse(asMap(map['prefs'])?['goLayout']),
   );
 
   final int revision;
@@ -763,6 +1015,7 @@ class DsBotTeam {
   final String? modelsKey;
   final bool memory;
   final String? readOnly;
+  final DsBotGoLayout? goLayout;
 
   DsBot? bot(String? id) {
     if (id == null) return null;
@@ -846,6 +1099,15 @@ class DsBotFileText {
   final bool? whole;
 }
 
+/// An image attachment named by a Bot chat item.
+class DsBotImageRef {
+  const DsBotImageRef(this.attachmentId, {this.mime, this.name});
+
+  final String attachmentId;
+  final String? mime;
+  final String? name;
+}
+
 enum DsBotItemKind { user, bot, event, answer, divider, unknown }
 
 /// One entry of a chat or a group chat, ready to draw.
@@ -863,6 +1125,8 @@ class DsBotItem {
     this.role,
     this.roomId,
     this.images = 0,
+    this.imageRefs = const [],
+    this.sessionId,
     this.duration,
     this.live = false,
     this.whole,
@@ -891,6 +1155,12 @@ class DsBotItem {
       role: asString(map['role']),
       roomId: asString(map['roomId']),
       images: asInt(map['images']) ?? 0,
+      imageRefs: [
+        for (final ref in asListOrEmpty(map['imageRefs']).map(asMapOrEmpty))
+          if (asString(ref['attachmentId']) case final id? when id.trim().isNotEmpty)
+            DsBotImageRef(id, mime: asString(ref['mime']), name: asString(ref['name'])),
+      ],
+      sessionId: asString(map['sessionId']),
       duration: asInt(map['duration']) == null ? null : Duration(milliseconds: asInt(map['duration'])!),
       live: asBool(map['live']) ?? false,
       whole: whole == null ? null : DsBotLongText(asInt(whole['length']) ?? 0, asMapOrEmpty(whole['file'])),
@@ -918,6 +1188,10 @@ class DsBotItem {
   final String? role;
   final String? roomId;
   final int images;
+  final List<DsBotImageRef> imageRefs;
+
+  /// The item's original session when supplied by the Host.
+  final String? sessionId;
   final Duration? duration;
 
   /// Said in the round still running; replaced by the logged one later.
@@ -1396,6 +1670,10 @@ class DsBotApi {
     final carrier = client.carrier;
     if (carrier is DshHttpCarrier) return DsBotApi(DsBotHttpTransport(carrier.connection));
     if (DsBotRpcTransport.reachable(client)) return DsBotApi(DsBotRpcTransport(client));
+    if (carrier is DsBotUnaryCarrier) {
+      final transport = (carrier as DsBotUnaryCarrier).openDsBotUnaryTransport();
+      if (transport != null) return DsBotApi(transport);
+    }
     return null;
   }
 
@@ -1424,6 +1702,16 @@ class DsBotApi {
     await call('state', {'since': ?since, 'models': ?modelsKey, 'locale': locale, 'avatars': 'ref'}),
   );
 
+  /// Replaces only the Go layout using its last observed revision.
+  Future<DsBotGoLayout> setGoLayout(DsBotGoLayout layout) async {
+    final prefs = asMap(await call('set-prefs', {'goLayout': layout.toJson()}));
+    final saved = DsBotGoLayout.parse(prefs?['goLayout']);
+    if (saved == null || saved.revision != layout.revision + 1) {
+      throw const DshProtocolException('DS Bot did not acknowledge the Go layout revision');
+    }
+    return saved;
+  }
+
   /// A Bot's photo as a `data:` URL; null when it has none.
   Future<({String? ref, String? image})> avatar(String botId) async {
     final map = asMapOrEmpty(await call('avatar', {'botId': botId}));
@@ -1436,9 +1724,38 @@ class DsBotApi {
   Future<DsBotRoomPage> roomChat(String roomId, {Object? cursor}) async =>
       DsBotRoomPage.fromJson(await call('room-chat', {'roomId': roomId, 'cursor': ?cursor}));
 
-  /// Sends [text] to a Bot (its id) or a group (its id).
-  Future<void> send(String conversationId, String text) =>
-      call('send', {'sessionId': conversationId, 'text': text}, const Duration(seconds: 40));
+  /// Reads an attachment previously named in the conversation's history.
+  /// With [preview], the Host may return a smaller rendition.
+  Future<Uint8List> image(String sessionId, String attachmentId, {bool preview = false}) async {
+    final result = asMapOrEmpty(
+      await call('image', {'sessionId': sessionId, 'attachmentId': attachmentId, if (preview) 'preview': true}),
+    );
+    final mime = asString(result['mime']);
+    final data = asString(result['data']);
+    if (mime == null || !mime.startsWith('image/') || data == null || data.isEmpty) {
+      throw const DshProtocolException('DS Bot returned no image data');
+    }
+    try {
+      return base64Decode(data);
+    } on FormatException {
+      throw const DshProtocolException('DS Bot returned invalid image data');
+    }
+  }
+
+  /// Stages one image for the next [send], returning its temporary ID.
+  Future<String> stageImage(String mediaType, List<int> bytes) async {
+    final result = asMap(await call('stage-image', {'mediaType': mediaType, 'data': base64Encode(bytes)}));
+    final id = asString(result?['id']);
+    if (id == null || id.isEmpty) throw const DshProtocolException('DS Bot returned no staged image ID');
+    return id;
+  }
+
+  /// Sends [text] and any staged [images] to a Bot or a group by its ID.
+  Future<void> send(String conversationId, String text, {List<String> images = const []}) => call('send', {
+    'sessionId': conversationId,
+    'text': text,
+    if (images.isNotEmpty) 'images': images,
+  }, const Duration(seconds: 40));
 
   /// Reads the Host's bounded preview, retaining its completeness metadata.
   Future<DsBotFileText> readFileText(DsBotLongText long) async =>
@@ -1534,6 +1851,12 @@ class DsBotApi {
     }
     return call('update-room', {'id': roomId, 'relayLimit': limit});
   }
+
+  /// Asks the room admin to align the goal with the user in the chat.
+  Future<void> draftRoomGoal(String roomId, String text) => call('goal-draft', {'roomId': roomId, 'text': text});
+
+  Future<void> controlRoomGoal(String roomId, String goalId, DsBotGoalAction action, {bool stopWork = false}) =>
+      call('goal-control', {'roomId': roomId, 'goalId': goalId, 'action': action.name, if (stopWork) 'stopWork': true});
 
   Future<void> deleteRoom(String id) => call('delete-room', {'id': id});
 

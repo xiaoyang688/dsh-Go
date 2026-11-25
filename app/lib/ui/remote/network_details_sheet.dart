@@ -65,6 +65,7 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
     final connected = status.isConnected;
     final network = connected && relay ? status.network : null;
     final path = connected && relay ? network?.path ?? status.path : null;
+    final https = path == RelayPath.https;
     final observedAt = network?.observedAt?.toLocal();
     final material = MaterialLocalizations.of(context);
     final observedLabel = observedAt == null
@@ -88,7 +89,9 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
             Padding(
               padding: const EdgeInsets.fromLTRB(kSheetGutter, 0, kSheetGutter, 12),
               child: Text(
-                relay
+                https
+                    ? l10n.remoteNetworkHttpsHint
+                    : relay
                     ? '${l10n.remoteNetworkAutomatic}\n${l10n.remoteNetworkSnapshotHint}'
                     : l10n.hostDetailsSshNetworkHint,
                 style: TextStyle(color: colors.textTertiary),
@@ -107,7 +110,7 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
                 ),
                 _NetworkValue(label: l10n.remoteNetworkConnectDuration, value: timing(network?.connectDuration)),
                 _NetworkValue(label: l10n.remoteNetworkRoundTripTime, value: timing(network?.roundTripTime)),
-                if (relay && connected && path != null && path != RelayPath.relay) ...[
+                if (relay && connected && path != null && path != RelayPath.relay && !https) ...[
                   _NetworkValue(label: l10n.remoteNetworkLocalIpVersion, value: ipVersion(network?.localIpVersion)),
                   _NetworkValue(label: l10n.remoteNetworkRemoteIpVersion, value: ipVersion(network?.remoteIpVersion)),
                   _NetworkValue(
@@ -123,7 +126,7 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
                   ),
               ],
             ),
-            if (relay)
+            if (relay && !https)
               Padding(
                 padding: const EdgeInsets.fromLTRB(kSheetGutter, 8, kSheetGutter, 20),
                 child: Column(
@@ -176,6 +179,7 @@ class _NetworkValue extends StatelessWidget {
 }
 
 String _fallbackLabel(L10n l10n, String code) => switch (code) {
+  'httpsUnavailable' => l10n.remoteNetworkReasonHttpsUnavailable,
   'webrtcUnavailable' => l10n.remoteNetworkFallbackWebrtcUnavailable,
   'directFailed' => l10n.remoteNetworkFallbackDirectFailed,
   'directTimeout' => l10n.remoteNetworkFallbackDirectTimeout,

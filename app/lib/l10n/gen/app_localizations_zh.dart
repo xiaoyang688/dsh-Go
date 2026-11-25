@@ -1909,6 +1909,144 @@ class L10nZh extends L10n {
   String get backgroundProtectionUpdateFailed => '未能更新后台保护，请查看当前状态后重试。';
 
   @override
+  String get botsLayoutCopy => '复制 DS Bot 布局';
+
+  @override
+  String get botsLayoutCopied => '已将布局复制到 DSH Go Layout。现在可以恢复官方 DS Bot。';
+
+  @override
+  String get botsLayoutCopyFailed => '无法确认布局已复制。请先刷新主机布局再试。';
+
+  @override
+  String get botsLayoutLoadFailed => '无法加载组织设置。点击重试。';
+
+  @override
+  String get botsLayoutEdit => '编辑组织';
+
+  @override
+  String get botsLayoutNewFolder => '新建组织文件夹';
+
+  @override
+  String get botsLayoutFolderName => '文件夹名称';
+
+  @override
+  String get botsLayoutInvalidName => '请输入 1–80 个字符作为文件夹名称。';
+
+  @override
+  String get botsLayoutMove => '移动到文件夹';
+
+  @override
+  String get botsLayoutRoot => '顶层';
+
+  @override
+  String get botsLayoutUp => '上移';
+
+  @override
+  String get botsLayoutDown => '下移';
+
+  @override
+  String get botsLayoutActions => '组织操作';
+
+  @override
+  String get botsLayoutDeleteFolder => '移除文件夹？';
+
+  @override
+  String get botsLayoutDeleteDescription => '其中的 Bot 和子文件夹将移到上一级。';
+
+  @override
+  String get botsLayoutConflict => '主机上的组织已变更。请重新打开编辑器以使用最新布局。';
+
+  @override
+  String get botsLayoutDisconnected => '重新连接主机后才能编辑组织。';
+
+  @override
+  String get botsLayoutTooLarge => '该组织已达到主机的布局上限。';
+
+  @override
+  String get botsGroupGoal => '群聊目标';
+
+  @override
+  String get botsGoalSet => '设定目标';
+
+  @override
+  String get botsGoalPrompt => '希望这个群聊达成什么？';
+
+  @override
+  String get botsGoalDraftHint => '群管理员会在聊天里和你一起明确目标及各个阶段。';
+
+  @override
+  String get botsGoalNeedsAdmin => '请先设置群管理员，再设定目标。';
+
+  @override
+  String get botsGoalSend => '发送目标请求';
+
+  @override
+  String get botsGoalDrafting => '拟定中';
+
+  @override
+  String get botsGoalActive => '进行中';
+
+  @override
+  String get botsGoalWaiting => '等待输入';
+
+  @override
+  String get botsGoalPaused => '已暂停';
+
+  @override
+  String get botsGoalComplete => '已完成';
+
+  @override
+  String get botsGoalStopped => '已停止';
+
+  @override
+  String get botsGoalPause => '暂停';
+
+  @override
+  String get botsGoalResume => '继续';
+
+  @override
+  String get botsGoalStop => '停止目标';
+
+  @override
+  String get botsGoalStopWarning => '这将停止目标，并中断群内当前的工作。';
+
+  @override
+  String get botsGoalClear => '清除目标';
+
+  @override
+  String get botsGoalCancelDraft => '取消目标草稿';
+
+  @override
+  String get botsGoalChanged => '目标已变化，请查看后再继续。';
+
+  @override
+  String get botsGoalUnavailable => '连接或群聊已变化，请重新打开此面板。';
+
+  @override
+  String botsGoalDoneWhen(String text) {
+    return '验收条件：$text';
+  }
+
+  @override
+  String botsGoalEvidence(String text) {
+    return '验收依据：$text';
+  }
+
+  @override
+  String botsGoalFeedback(String text) {
+    return '反馈：$text';
+  }
+
+  @override
+  String get botsGoalCurrentStage => '当前阶段';
+
+  @override
+  String get botsGoalTaskReported => '已汇报';
+
+  @override
+  String get botsGoalTaskPending => '未开始';
+
+  @override
   String get botsFolderGone => '这个文件夹已经不在了';
 
   @override
@@ -2420,10 +2558,10 @@ class L10nZh extends L10n {
   String get botsMentionMember => '提到成员';
 
   @override
-  String get botsRelayUnavailable => '经中转连接时用不了 Bot';
+  String get botsRelayUnavailable => '这台远程主机的 DS Bot 不可用';
 
   @override
-  String get botsUseSsh => '用 SSH 连接这台电脑即可使用';
+  String get botsUseSsh => '请确认主机已更新并启用 DSH Remote 和 DS Bot 插件，然后重新连接。也可以改用 SSH 连接。';
 
   @override
   String get botsTeamLoadFailed => '没能读取 Bot 团队';
@@ -17949,6 +18087,48 @@ class L10nZh extends L10n {
 
   @override
   String get remotePathLan => 'LAN 局域网';
+
+  @override
+  String get remotePathHttps => 'HTTPS';
+
+  @override
+  String get remoteHttpsLine => 'HTTPS 专线';
+
+  @override
+  String get remoteHttpsAuthorizationUrl => 'HTTPS 授权链接';
+
+  @override
+  String get remoteHttpsHelp => '粘贴此主机的 DSH Web 授权链接，包含 token。手机会安全保存此链接，并优先尝试使用。HTTPS 不可用时，DSH Remote 可使用原有线路。';
+
+  @override
+  String get remoteHttpsConfigured => '已配置 HTTPS 专线';
+
+  @override
+  String get remoteHttpsUnconfigured => '未配置 HTTPS 专线';
+
+  @override
+  String get remoteHttpsLoading => '正在读取 HTTPS 设置…';
+
+  @override
+  String get remoteHttpsClear => '移除专线';
+
+  @override
+  String get remoteHttpsInvalidUrl => '请输入 HTTPS 链接，仅包含一个 token 参数，且不能包含片段、内嵌用户名或密码。';
+
+  @override
+  String get remoteHttpsScopeChanged => '当前账号或主机已变化，请重新打开此主机的 HTTPS 设置。';
+
+  @override
+  String get remoteHttpsReadFailed => '无法读取此手机上的 HTTPS 设置。';
+
+  @override
+  String get remoteHttpsSaveFailed => '无法更新 HTTPS 设置，请确认主机仍在列表中并重试。';
+
+  @override
+  String get remoteNetworkHttpsHint => '当前连接通过 TLS 访问已配置的 HTTPS 端点。';
+
+  @override
+  String get remoteNetworkReasonHttpsUnavailable => '未能建立安全的 DSH Web 连接，已改用 DSH Remote 线路。';
 
   @override
   String get remotePathP2p => 'P2P 点对点';

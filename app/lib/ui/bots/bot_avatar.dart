@@ -1,18 +1,21 @@
-// A Bot's face in the app: its photo, else its initial on a tint of its DS
-// Bot color (the web client draws characters this app does not have), and a
-// group's members stacked.
+// SPDX-FileCopyrightText: 2026 Fei2411 and the DS Bot contributors
+// SPDX-License-Identifier: Apache-2.0
+// See THIRD_PARTY_NOTICES.md.
+// Modified: DS Bot 0.3.10 RoomAvatar cluster adapted to Flutter.
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/bots_state.dart';
 import '../common/display_image.dart';
-import '../common/status_dot.dart';
-import '../fx/bot_avatar/bot_avatar.dart' as fx;
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'bot_character.dart';
 import 'bot_format.dart';
+
+export 'bot_character.dart' show BotAvatarState, botAvatarState;
 
 /// The Bot's color for the current theme.
 Color botInk(BuildContext context, String color) =>
@@ -21,38 +24,33 @@ Color botInk(BuildContext context, String color) =>
 /// Name text in the Bot's color: black reads as a heading, so it goes gray.
 Color botNameInk(BuildContext context, String color) => botInk(context, color == 'black' ? 'gray' : color);
 
-/// Round avatar: the Bot's photo, else a little bot of its own (see [mascot]).
-/// [working] adds a breathing dot at the lower right of a photo or letter; the
-/// little bot hops instead.
+/// The team's selected photo or character, with the status outside the face.
 class BotAvatar extends ConsumerWidget {
-  const BotAvatar({super.key, required this.bot, this.size = 40, this.working = false, this.mascot = true});
+  const BotAvatar({
+    super.key,
+    required this.bot,
+    this.size = 40,
+    this.state,
+    this.working = false,
+    this.main = false,
+    this.badge = true,
+    this.live = false,
+  });
 
   final DsBot bot;
   final double size;
+  final BotAvatarState? state;
   final bool working;
-
-  /// Without a photo, a Libraries.dev bot rather than the initial. Stacked
-  /// group faces keep the initial: two bots overlapping hide each other.
-  final bool mascot;
+  final bool main;
+  final bool badge;
+  final bool live;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ref0 = bot.imageRef;
-    final photo = ref0 == null ? null : ref.watch(dsBotPhotoProvider((botId: bot.id, ref: ref0))).value;
-    // No photo: a Libraries.dev bot in the Bot's own colour, the same one for
-    // this Bot every time; it hops while the Bot works, so no dot is needed.
-    final Widget fallback = mascot
-        ? fx.BotAvatar(
-            id: bot.id,
-            size: size,
-            color: botInk(context, bot.ink),
-            state: working ? fx.BotAvatarState.working : fx.BotAvatarState.idle,
-            // Glossy plastic: drawn on the first frame; plush fur bakes in the background.
-            shading: fx.BotAvatarShading.plastic,
-            excludeFromSemantics: true,
-          )
-        : BotMonogram(name: bot.name, color: bot.ink, size: size);
-    if (photo == null && mascot) return ExcludeSemantics(child: fallback);
+    final imageRef = bot.imageRef;
+    final photo = imageRef == null ? null : ref.watch(dsBotPhotoProvider((botId: bot.id, ref: imageRef))).value;
+    final shape = botCharacterId(bot);
+    final fallback = BotCharacter(shape: shape, color: botInk(context, bot.ink), aurora: bot.ink == 'aurora');
     final face = photo == null
         ? fallback
         : ClipOval(
@@ -70,28 +68,78 @@ class BotAvatar extends ConsumerWidget {
               errorBuilder: (context, _, _) => fallback,
             ),
           );
-    if (!working) return ExcludeSemantics(child: face);
-    final dot = (size * 0.28).clamp(8.0, 12.0);
+    final pose = state ?? (working ? BotAvatarState.working : BotAvatarState.idle);
+    final active = pose != BotAvatarState.idle && pose != BotAvatarState.waiting && pose != BotAvatarState.done;
+    final animate = live || state != null || working;
+    final mark = animate
+        ? BotCharacterMotion(
+            key: ValueKey(bot.id),
+            id: bot.id,
+            idleBlink: live,
+            shape: shape,
+            photo: photo != null,
+            state: pose,
+            child: face,
+          )
+        : face;
     return ExcludeSemantics(
       child: SizedBox.square(
         dimension: size,
         child: Stack(
+          fit: StackFit.expand,
           clipBehavior: Clip.none,
           children: [
-            face,
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: DecoratedBox(
-                decoration: ShapeDecoration(color: DshSurfaces.of(context).backdropTop, shape: const CircleBorder()),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: StatusDot(tone: StatusTone.busy, size: dot),
-                ),
+            mark,
+            if (badge && (active || main))
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: _BotBadge(size: size, active: active, alert: pose == BotAvatarState.alert),
               ),
-            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BotBadge extends StatelessWidget {
+  const _BotBadge({required this.size, required this.active, required this.alert});
+
+  final double size;
+  final bool active;
+  final bool alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final surface = DshSurfaces.of(context).backdropTop;
+    final extent = alert ? (size * 0.3).clamp(10.0, 14.0) : (size * 0.21).clamp(5.0, 9.0);
+    if (!active) {
+      return Icon(Icons.star_rounded, size: (size * 0.36).clamp(14.0, 22.0), color: const Color(0xffeab44e));
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: alert ? theme.colorScheme.primary : const Color(0xff10b981),
+        shape: BoxShape.circle,
+        border: Border.all(color: surface, width: 1.25),
+      ),
+      child: SizedBox.square(
+        dimension: extent,
+        child: alert
+            ? Center(
+                child: Text(
+                  '?',
+                  textScaler: TextScaler.noScaling,
+                  style: TextStyle(
+                    color: theme.colorScheme.onPrimary,
+                    fontSize: extent * .71,
+                    height: 1,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -139,7 +187,8 @@ class BotMonogram extends StatelessWidget {
   }
 }
 
-/// A group: its first two members, the second over the first's lower right.
+/// The team's group portrait. Beyond four members, the last seat counts the
+/// members that don't fit, as in DS Bot's Web client.
 class RoomAvatar extends StatelessWidget {
   const RoomAvatar({super.key, required this.room, required this.team, this.size = 40});
 
@@ -149,10 +198,7 @@ class RoomAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final members = [
-      for (final id in [if (room.admin != null) room.admin!, ...room.members.where((m) => m != room.admin)])
-        ?team.bot(id),
-    ];
+    final members = [for (final id in room.members.toSet()) ?team.bot(id)];
     if (members.isEmpty) {
       return SizedBox.square(
         dimension: size,
@@ -165,27 +211,38 @@ class RoomAvatar extends StatelessWidget {
         ),
       );
     }
-    if (members.length == 1) return BotAvatar(bot: members.first, size: size);
-    final small = size * 0.6;
-    final gap = (size * 0.05).clamp(1.5, 3.0);
+    final seats = switch (members.length) {
+      1 || 2 => [
+        Rect.fromLTWH(0, 0, size * 2 / 3, size * 2 / 3),
+        Rect.fromLTWH(size / 3, size / 3, size * 2 / 3, size * 2 / 3),
+      ],
+      3 => [
+        Rect.fromLTWH(size * 2 / 9, 0, size * 5 / 9, size * 5 / 9),
+        Rect.fromLTWH(0, size * 4 / 9, size * 5 / 9, size * 5 / 9),
+        Rect.fromLTWH(size * 4 / 9, size * 4 / 9, size * 5 / 9, size * 5 / 9),
+      ],
+      _ => [
+        for (var i = 0; i < 4; i++) Rect.fromLTWH(i.isOdd ? size / 2 : 0, i >= 2 ? size / 2 : 0, size / 2, size / 2),
+      ],
+    };
+    final overflow = members.length > 4 ? members.length - 3 : 0;
     return ExcludeSemantics(
       child: SizedBox.square(
         dimension: size,
         child: Stack(
           children: [
-            Positioned(
-              left: 0,
-              top: 0,
-              child: ClipPath(
-                clipper: _RearClipper(offset: size - small, gap: gap),
-                child: BotAvatar(bot: members[0], size: small, mascot: false),
+            for (var i = 0; i < seats.length; i++)
+              Positioned.fromRect(
+                rect: seats[i],
+                child: ClipPath(
+                  clipper: _SeatClipper(seats[i].topLeft, seats.skip(i + 1).toList(), size / 14),
+                  child: overflow > 0 && i == 3
+                      ? _RoomAvatarSeat(label: '+$overflow', size: seats[i].width)
+                      : i >= members.length
+                      ? _RoomAvatarSeat(size: seats[i].width)
+                      : BotAvatar(key: ValueKey(members[i].id), bot: members[i], size: seats[i].width, badge: false),
+                ),
               ),
-            ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: BotAvatar(bot: members[1], size: small, mascot: false),
-            ),
           ],
         ),
       ),
@@ -193,20 +250,56 @@ class RoomAvatar extends StatelessWidget {
   }
 }
 
-/// The rear face minus the front one grown by [gap]: a clear seam between the
-/// two, with no backdrop-coloured ring painted over the rear initial.
-class _RearClipper extends CustomClipper<Path> {
-  const _RearClipper({required this.offset, required this.gap});
+class _RoomAvatarSeat extends StatelessWidget {
+  const _RoomAvatarSeat({this.label, required this.size});
 
-  final double offset;
+  final String? label;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.all(size * 0.04),
+    child: DecoratedBox(
+      decoration: ShapeDecoration(
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
+        shape: const CircleBorder(),
+      ),
+      child: label == null
+          ? null
+          : Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label!,
+                  textScaler: TextScaler.noScaling,
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: (size * 0.36).clamp(8.0, 16.0)),
+                ),
+              ),
+            ),
+    ),
+  );
+}
+
+/// Leaves gaps behind overlapping faces without adding a background ring.
+class _SeatClipper extends CustomClipper<Path> {
+  const _SeatClipper(this.origin, this.front, this.gap);
+
+  final Offset origin;
+  final List<Rect> front;
   final double gap;
 
   @override
   Path getClip(Size size) {
-    final front = Rect.fromCircle(center: size.center(Offset(offset, offset)), radius: size.width / 2 + gap);
-    return Path.combine(PathOperation.difference, Path()..addOval(Offset.zero & size), Path()..addOval(front));
+    var clip = Path()..addRect(Offset.zero & size);
+    for (final face in front) {
+      final circle = Rect.fromCircle(center: face.center - origin, radius: face.width * .48 + gap);
+      if (circle.overlaps(Offset.zero & size)) {
+        clip = Path.combine(PathOperation.difference, clip, Path()..addOval(circle));
+      }
+    }
+    return clip;
   }
 
   @override
-  bool shouldReclip(_RearClipper old) => old.offset != offset || old.gap != gap;
+  bool shouldReclip(_SeatClipper old) => old.origin != origin || old.gap != gap || !listEquals(old.front, front);
 }

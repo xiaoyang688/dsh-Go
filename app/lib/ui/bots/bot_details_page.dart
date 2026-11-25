@@ -98,7 +98,7 @@ class BotDetailsPage extends ConsumerWidget {
     return AppPage(
       title: bot.name,
       hero: PageHero(
-        leading: BotAvatar(bot: bot, size: 56, working: work != null),
+        leading: BotAvatar(bot: bot, size: 56, state: botAvatarState(status.live, bot.id, team: team), live: true),
         title: bot.name,
         subtitle: Text(
           [if (main) l10n.botsMainBot, if (bot.role.isNotEmpty) bot.role, ?doing].join(' · ').ifEmpty('Bot'),

@@ -919,6 +919,9 @@ class FakeRemoteHost {
   /// Unary handlers by endpoint; default: `gateway/not-found`.
   final Map<String, Map<String, Object?> Function(Map<String, Object?> args)> handlers = {};
 
+  /// Fixed plugin-route RPC handler for installed Host compatibility tests.
+  Future<Object?> Function(Map<String, Object?> params)? pluginRoute;
+
   /// Optional unary reply gate, after execution but before the encrypted reply.
   Future<void> Function(String endpoint)? beforeUnaryResponse;
 
@@ -1223,6 +1226,15 @@ class FakeRemoteHost {
         final upload = workspaceUpload;
         if (upload == null) return reject('FEATURE_NOT_SUPPORTED', 'No workspace upload handler.');
         respond(await upload(method, params));
+      case 'plugin.route.call':
+        final route = pluginRoute;
+        if (route == null) return reject('FEATURE_NOT_SUPPORTED', 'This Host cannot forward local plugin routes.');
+        final result = await route(params);
+        final limit = directResponseLimit;
+        if (limit != null && utf8.encode(jsonEncode(result)).length > limit) {
+          return reject('RESPONSE_TOO_LARGE', 'Too large for a direct response.');
+        }
+        respond(result);
       case 'harness.remote.call':
         final endpoint = params['endpoint']! as String;
         if (!harnessRemoteAllowlist.contains(endpoint)) {

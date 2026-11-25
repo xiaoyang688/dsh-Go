@@ -125,8 +125,18 @@ class SessionsDrawer extends ConsumerWidget {
       Future<void>.delayed(AppMotion.slow, onClose);
     }
 
-    final selecting =
-        ref.watch(drawerSelectionProvider.select((s) => s != null)) && ref.watch(drawerScopeProvider)?.readOnly != true;
+    final scope = ref.watch(
+      drawerScopeProvider.select(
+        (s) => (
+          readOnly: s?.readOnly == true,
+          hasBots: s?.bots.isNotEmpty == true,
+          botsRunning: s?.bots.any((bot) => bot.running) == true,
+        ),
+      ),
+    );
+    final selecting = ref.watch(drawerSelectionProvider.select((s) => s != null)) && !scope.readOnly;
+    final bot = ref.watch(dsBotProvider.select((s) => (ready: s.ready, running: s.live.bots.isNotEmpty)));
+    final showBots = bot.ready || scope.hasBots;
     // The drawer stays mounted with the shell: it keeps the unread record
     // following what the person opens and leaves.
     ref.listen(drawerSeenProvider, (_, _) {});
@@ -208,9 +218,22 @@ class SessionsDrawer extends ConsumerWidget {
         alignment: Alignment.topCenter,
         child: const DrawerFilterBar(),
       ),
+      // DS Bot is a host destination outside the conversation filters.
+      if (showBots && !selecting)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: contentEdge),
+          child: DsBotDrawerRow(
+            running: bot.running || scope.botsRunning,
+            onTap: () {
+              Navigator.of(context).push(BotsPage.route());
+              // Close once the page covers us, so "back" lands on the chat.
+              Future<void>.delayed(AppMotion.slow, onClose);
+            },
+          ),
+        ),
     ];
     final list = _EdgeFade(
-      child: _SessionList(onClose: onClose, now: now),
+      child: _SessionList(onClose: onClose, now: now, showBots: showBots),
     );
 
     const radius = BorderRadius.only(topRight: Radius.circular(AppShape.xl), bottomRight: Radius.circular(AppShape.xl));
@@ -460,9 +483,10 @@ class _EdgeFade extends StatelessWidget {
 }
 
 class _SessionList extends ConsumerWidget {
-  const _SessionList({required this.onClose, this.now});
+  const _SessionList({required this.onClose, required this.showBots, this.now});
 
   final VoidCallback onClose;
+  final bool showBots;
   final DateTime? now;
 
   @override
@@ -489,10 +513,6 @@ class _SessionList extends ConsumerWidget {
       }
       return const _SkeletonList();
     }
-    // DS Bot's conversations (its Bots' chats, groups, members' sessions)
-    // fold into one row that opens the Bot pages.
-    final botReady = ref.watch(dsBotProvider.select((s) => s.ready));
-    final showBots = scope.bots.isNotEmpty || (workspace == null && botReady);
     if (scope.sessions.isEmpty && !showBots && ref.watch(drawerViewProvider).folders.isEmpty) {
       if (scope.readOnly) return _Centered(child: Text(readListStatusText(scope.status)));
       return workspace == null ? const _EmptyState() : const _WorkspaceEmptyState();
@@ -501,16 +521,6 @@ class _SessionList extends ConsumerWidget {
       now: now,
       onNewChat: onClose,
       readOnly: scope.readOnly,
-      leading: showBots
-          ? DsBotDrawerRow(
-              running: scope.bots.any((s) => s.running),
-              onTap: () {
-                Navigator.of(context).push(BotsPage.route());
-                // Close once the page covers us, so "back" lands on the chat.
-                Future<void>.delayed(AppMotion.slow, onClose);
-              },
-            )
-          : null,
       onOpen: (id) {
         if (SessionOpenTiming.enabled) {
           SessionOpenTiming.start(ref.read(currentSessionProvider) == id ? null : id);

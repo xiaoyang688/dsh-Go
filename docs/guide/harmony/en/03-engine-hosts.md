@@ -123,7 +123,11 @@ DSH Remote uses ArkWeb WebRTC to try a direct connection (LAN or P2P), then TURN
 
 **Compact history** is off by default. Supporting DSH Remote Hosts summarize historical tool arguments and output to reduce history transfer; message text, live replies, approvals and original Host records stay unchanged. Switch to another host (or this phone) and back, or restart the app, to apply. The current client and its automatic reconnects retain their original mode to avoid mixing cached history. After turning it off, select the host again and reopen the chat to load full history. Older Hosts continue sending full history; SSH is unaffected.
 
-DSH Remote connects to one host at a time; switching disconnects the previous one. Over DSH Remote: you can send images only, DSH Web doesn't open in the app, plugins can only be turned on or off, and DS Bot and chat log export aren't available. Conversation backups use a separate session-transfer capability, not chat log export.
+DSH Remote connects to one host at a time; switching disconnects the previous one. Over DSH Remote: you can send images only, DSH Web doesn't open in the app, plugins can only be turned on or off, and chat log export is unavailable. With compatible Remote and DS Bot plugins enabled on the host, open DS Bot from All features. Conversation backups use a separate session-transfer capability, not chat log export.
+
+## Dedicated HTTPS line
+
+Open the dedicated HTTPS settings for the target Remote host and paste its DSH Web HTTPS authorization link with a `token` parameter. The app stores the link in secure storage and tries HTTPS first when connecting. The gateway must forward authorization, DSH APIs, and the WebSocket upgrade at `/api/remote.mux` under the configured mount path. If HTTPS cannot establish the connection, the app tries the existing Remote routes.
 
 ## Conversation backups and restore
 

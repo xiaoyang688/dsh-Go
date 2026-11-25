@@ -1089,6 +1089,71 @@
   "backgroundProtectionUnavailable": "保护暂不可用，请返回 App 重试；长任务可保持前台或使用远程主机。",
   "backgroundProtectionCleanup": "正在结束上一次后台保护，尚未完成释放。",
   "backgroundProtectionUpdateFailed": "未能更新后台保护，请查看当前状态后重试。",
+  "botsLayoutCopy": "复制 DS Bot 布局",
+  "botsLayoutCopied": "已将布局复制到 DSH Go Layout。现在可以恢复官方 DS Bot。",
+  "botsLayoutCopyFailed": "无法确认布局已复制。请先刷新主机布局再试。",
+  "botsLayoutLoadFailed": "无法加载组织设置。点击重试。",
+  "botsLayoutEdit": "编辑组织",
+  "botsLayoutNewFolder": "新建组织文件夹",
+  "botsLayoutFolderName": "文件夹名称",
+  "botsLayoutInvalidName": "请输入 1–80 个字符作为文件夹名称。",
+  "botsLayoutMove": "移动到文件夹",
+  "botsLayoutRoot": "顶层",
+  "botsLayoutUp": "上移",
+  "botsLayoutDown": "下移",
+  "botsLayoutActions": "组织操作",
+  "botsLayoutDeleteFolder": "移除文件夹？",
+  "botsLayoutDeleteDescription": "其中的 Bot 和子文件夹将移到上一级。",
+  "botsLayoutConflict": "主机上的组织已变更。请重新打开编辑器以使用最新布局。",
+  "botsLayoutDisconnected": "重新连接主机后才能编辑组织。",
+  "botsLayoutTooLarge": "该组织已达到主机的布局上限。",
+  "botsGroupGoal": "群聊目标",
+  "botsGoalSet": "设定目标",
+  "botsGoalPrompt": "希望这个群聊达成什么？",
+  "botsGoalDraftHint": "群管理员会在聊天里和你一起明确目标及各个阶段。",
+  "botsGoalNeedsAdmin": "请先设置群管理员，再设定目标。",
+  "botsGoalSend": "发送目标请求",
+  "botsGoalDrafting": "拟定中",
+  "botsGoalActive": "进行中",
+  "botsGoalWaiting": "等待输入",
+  "botsGoalPaused": "已暂停",
+  "botsGoalComplete": "已完成",
+  "botsGoalStopped": "已停止",
+  "botsGoalPause": "暂停",
+  "botsGoalResume": "继续",
+  "botsGoalStop": "停止目标",
+  "botsGoalStopWarning": "这将停止目标，并中断群内当前的工作。",
+  "botsGoalClear": "清除目标",
+  "botsGoalCancelDraft": "取消目标草稿",
+  "botsGoalChanged": "目标已变化，请查看后再继续。",
+  "botsGoalUnavailable": "连接或群聊已变化，请重新打开此面板。",
+  "botsGoalDoneWhen": "验收条件：{text}",
+  "@botsGoalDoneWhen": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "botsGoalEvidence": "验收依据：{text}",
+  "@botsGoalEvidence": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "botsGoalFeedback": "反馈：{text}",
+  "@botsGoalFeedback": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "botsGoalCurrentStage": "当前阶段",
+  "botsGoalTaskReported": "已汇报",
+  "botsGoalTaskPending": "未开始",
   "botsFolderGone": "这个文件夹已经不在了",
   "botsFolderReadFailed": "没能读取这个文件夹",
   "botsFolderOpenFailed": "打不开这个文件夹",
@@ -1490,8 +1555,8 @@
   },
   "botsChooseMember": "选择成员",
   "botsMentionMember": "提到成员",
-  "botsRelayUnavailable": "经中转连接时用不了 Bot",
-  "botsUseSsh": "用 SSH 连接这台电脑即可使用",
+  "botsRelayUnavailable": "这台远程主机的 DS Bot 不可用",
+  "botsUseSsh": "请确认主机已更新并启用 DSH Remote 和 DS Bot 插件，然后重新连接。也可以改用 SSH 连接。",
   "botsTeamLoadFailed": "没能读取 Bot 团队",
   "botsBotCount": "{count} 个 Bot",
   "@botsBotCount": {
@@ -10802,6 +10867,20 @@
     }
   },
   "remotePathLan": "LAN 局域网",
+  "remotePathHttps": "HTTPS",
+  "remoteHttpsLine": "HTTPS 专线",
+  "remoteHttpsAuthorizationUrl": "HTTPS 授权链接",
+  "remoteHttpsHelp": "粘贴此主机的 DSH Web 授权链接，包含 token。手机会安全保存此链接，并优先尝试使用。HTTPS 不可用时，DSH Remote 可使用原有线路。",
+  "remoteHttpsConfigured": "已配置 HTTPS 专线",
+  "remoteHttpsUnconfigured": "未配置 HTTPS 专线",
+  "remoteHttpsLoading": "正在读取 HTTPS 设置…",
+  "remoteHttpsClear": "移除专线",
+  "remoteHttpsInvalidUrl": "请输入 HTTPS 链接，仅包含一个 token 参数，且不能包含片段、内嵌用户名或密码。",
+  "remoteHttpsScopeChanged": "当前账号或主机已变化，请重新打开此主机的 HTTPS 设置。",
+  "remoteHttpsReadFailed": "无法读取此手机上的 HTTPS 设置。",
+  "remoteHttpsSaveFailed": "无法更新 HTTPS 设置，请确认主机仍在列表中并重试。",
+  "remoteNetworkHttpsHint": "当前连接通过 TLS 访问已配置的 HTTPS 端点。",
+  "remoteNetworkReasonHttpsUnavailable": "未能建立安全的 DSH Web 连接，已改用 DSH Remote 线路。",
   "remotePathP2p": "P2P 点对点",
   "remoteNetworkDetails": "网络详情",
   "remoteNetworkAutomatic": "自动依次尝试 LAN → P2P → TURN → Relay，连接全程端到端加密。",

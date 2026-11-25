@@ -2022,6 +2022,145 @@ class L10nEn extends L10n {
       'Could not update background protection. Check the current status and try again.';
 
   @override
+  String get botsLayoutCopy => 'Copy DS Bot layout';
+
+  @override
+  String get botsLayoutCopied => 'Layout copied to DSH Go Layout. You can now restore official DS Bot.';
+
+  @override
+  String get botsLayoutCopyFailed => 'Could not verify the layout copy. Refresh the host layout before trying again.';
+
+  @override
+  String get botsLayoutLoadFailed => 'Could not load organization settings. Tap to retry.';
+
+  @override
+  String get botsLayoutEdit => 'Edit organization';
+
+  @override
+  String get botsLayoutNewFolder => 'New organization folder';
+
+  @override
+  String get botsLayoutFolderName => 'Folder name';
+
+  @override
+  String get botsLayoutInvalidName => 'Enter a folder name with 1–80 characters.';
+
+  @override
+  String get botsLayoutMove => 'Move to folder';
+
+  @override
+  String get botsLayoutRoot => 'Top level';
+
+  @override
+  String get botsLayoutUp => 'Move up';
+
+  @override
+  String get botsLayoutDown => 'Move down';
+
+  @override
+  String get botsLayoutActions => 'Organization actions';
+
+  @override
+  String get botsLayoutDeleteFolder => 'Remove folder?';
+
+  @override
+  String get botsLayoutDeleteDescription => 'Bots and subfolders will move up one level.';
+
+  @override
+  String get botsLayoutConflict =>
+      'The host changed this organization. Open the editor again to use the latest layout.';
+
+  @override
+  String get botsLayoutDisconnected => 'Reconnect to the host before editing its organization.';
+
+  @override
+  String get botsLayoutTooLarge => 'This organization has reached the host’s layout limit.';
+
+  @override
+  String get botsGroupGoal => 'Group goal';
+
+  @override
+  String get botsGoalSet => 'Set a goal';
+
+  @override
+  String get botsGoalPrompt => 'What should this group achieve?';
+
+  @override
+  String get botsGoalDraftHint => 'The group admin will work out the goal and its stages with you in the chat.';
+
+  @override
+  String get botsGoalNeedsAdmin => 'Choose a group admin before setting a goal.';
+
+  @override
+  String get botsGoalSend => 'Send goal request';
+
+  @override
+  String get botsGoalDrafting => 'Drafting';
+
+  @override
+  String get botsGoalActive => 'In progress';
+
+  @override
+  String get botsGoalWaiting => 'Waiting for input';
+
+  @override
+  String get botsGoalPaused => 'Paused';
+
+  @override
+  String get botsGoalComplete => 'Complete';
+
+  @override
+  String get botsGoalStopped => 'Stopped';
+
+  @override
+  String get botsGoalPause => 'Pause';
+
+  @override
+  String get botsGoalResume => 'Resume';
+
+  @override
+  String get botsGoalStop => 'Stop goal';
+
+  @override
+  String get botsGoalStopWarning => 'This will stop the goal and interrupt current work in this group.';
+
+  @override
+  String get botsGoalClear => 'Clear goal';
+
+  @override
+  String get botsGoalCancelDraft => 'Cancel goal draft';
+
+  @override
+  String get botsGoalChanged => 'The goal changed. Review it before continuing.';
+
+  @override
+  String get botsGoalUnavailable => 'The connection or group changed. Reopen this panel to continue.';
+
+  @override
+  String botsGoalDoneWhen(String text) {
+    return 'Done when: $text';
+  }
+
+  @override
+  String botsGoalEvidence(String text) {
+    return 'Evidence: $text';
+  }
+
+  @override
+  String botsGoalFeedback(String text) {
+    return 'Feedback: $text';
+  }
+
+  @override
+  String get botsGoalCurrentStage => 'Current stage';
+
+  @override
+  String get botsGoalTaskReported => 'Reported';
+
+  @override
+  String get botsGoalTaskPending => 'Not started';
+
+  @override
   String get botsFolderGone => 'This folder is gone';
 
   @override
@@ -2570,10 +2709,11 @@ class L10nEn extends L10n {
   String get botsMentionMember => 'Mention member';
 
   @override
-  String get botsRelayUnavailable => 'Bots aren’t available over Relay';
+  String get botsRelayUnavailable => 'DS Bot is unavailable on this Remote host';
 
   @override
-  String get botsUseSsh => 'Connect to this computer over SSH to use bots';
+  String get botsUseSsh =>
+      'Check that the host’s DSH Remote and DS Bot plugins are up to date and enabled, then reconnect. You can also connect over SSH.';
 
   @override
   String get botsTeamLoadFailed => 'Couldn’t load the bot team';
@@ -18924,6 +19064,52 @@ class L10nEn extends L10n {
 
   @override
   String get remotePathLan => 'LAN';
+
+  @override
+  String get remotePathHttps => 'HTTPS';
+
+  @override
+  String get remoteHttpsLine => 'HTTPS line';
+
+  @override
+  String get remoteHttpsAuthorizationUrl => 'HTTPS authorization URL';
+
+  @override
+  String get remoteHttpsHelp =>
+      'Paste the DSH Web authorization URL for this host, including its token. The phone stores this link securely and tries it first. If HTTPS is unavailable, DSH Remote can use its usual routes.';
+
+  @override
+  String get remoteHttpsConfigured => 'HTTPS line configured';
+
+  @override
+  String get remoteHttpsUnconfigured => 'HTTPS line unconfigured';
+
+  @override
+  String get remoteHttpsLoading => 'Reading HTTPS settings…';
+
+  @override
+  String get remoteHttpsClear => 'Remove line';
+
+  @override
+  String get remoteHttpsInvalidUrl =>
+      'Enter an HTTPS URL with one token parameter and no fragment or embedded username or password.';
+
+  @override
+  String get remoteHttpsScopeChanged => 'The selected account or host changed. Reopen this host’s HTTPS settings.';
+
+  @override
+  String get remoteHttpsReadFailed => 'Couldn’t read the HTTPS settings on this phone.';
+
+  @override
+  String get remoteHttpsSaveFailed =>
+      'Couldn’t update the HTTPS settings. Check that this host is still selected and try again.';
+
+  @override
+  String get remoteNetworkHttpsHint => 'This connection uses TLS to the configured HTTPS endpoint.';
+
+  @override
+  String get remoteNetworkReasonHttpsUnavailable =>
+      'The secure DSH Web connection couldn’t be established. Using a DSH Remote route.';
 
   @override
   String get remotePathP2p => 'P2P';

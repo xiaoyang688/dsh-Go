@@ -32,6 +32,7 @@ export 'src/cot_translation_api.dart';
 export 'src/deliverables.dart';
 export 'src/dsh_go_api.dart';
 export 'src/dsbot_api.dart';
+export 'src/go_layout_api.dart';
 export 'src/engine_settings_api.dart';
 export 'src/editors_api.dart';
 export 'src/errors.dart';

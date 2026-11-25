@@ -9,10 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
-import '../../state/settings_state.dart';
+import '../../state/attachments.dart';
 import '../../state/bots_state.dart';
 import '../../state/connection_state.dart';
-import '../chat/composer.dart';
 import '../chat/dsh_ui/dsh_ui.dart';
 import '../chat/model_sheet.dart';
 import '../chat/widgets/approval_card.dart';
@@ -24,12 +23,15 @@ import 'bot_stop_guard.dart';
 import 'bot_action_scope.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'bot_composer.dart';
 import 'bot_draft_send.dart';
+import 'bot_skill_sheet.dart';
 import 'bot_avatar.dart';
 import 'unavailable_message.dart';
 import 'bot_chat_kit.dart';
 import 'bot_details_page.dart';
 import 'bot_format.dart';
+import 'bot_history_images.dart';
 import 'bot_pending_card.dart';
 
 class BotChatPage extends ConsumerStatefulWidget {
@@ -74,17 +76,20 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
   bool _sendsTo(BotActionScope target, String part) {
     if (!mounted || target.botId != widget.botId || !target.current(context, ref)) return false;
     final status = ref.read(dsBotProvider);
-    return status.ready && status.team?.bot(widget.botId)?.sessionId == part;
+    return status.ready &&
+        status.team?.bot(widget.botId)?.sessionId == part &&
+        !ref.read(botChatProvider(widget.botId)).stale;
   }
 
-  Future<void> _send(BotActionScope target, String part) async {
-    if (!_sendsTo(target, part)) return;
-    await sendBotDraft(
+  Future<bool> _send(BotActionScope target, String part, List<DraftAttachment> images) async {
+    if (!_sendsTo(target, part)) return false;
+    return sendBotDraft(
       context,
       ref,
       _input,
       botId: widget.botId,
-      send: (text) => ref.read(botChatProvider(widget.botId).notifier).send(text),
+      images: images,
+      send: (text, ids) => ref.read(botChatProvider(widget.botId).notifier).send(text, images: ids),
     );
   }
 
@@ -94,10 +99,53 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
 
   Future<void> _pickModel(DsBot bot, BotActionScope scope) => pickBotModel(context, ref, bot, scope: scope);
 
+  Future<void> _pickSkill(BotActionScope target, String part) async {
+    final client = ref.read(activeConnectionProvider).value?.client;
+    if (client == null) return;
+    bool current() =>
+        _sendsTo(target, part) &&
+        identical(ref.read(activeConnectionProvider).value?.client, client) &&
+        ref.read(dsBotProvider).team?.bot(widget.botId)?.engine == null;
+    if (!current()) return;
+    final skill = await showBotSkillSheet(context, () async {
+      if (!current()) throw const DshClosedException('Bot chat changed');
+      return client.listSkills(part);
+    });
+    if (skill == null || !current()) return;
+
+    // The Host recognizes a literal /name in a direct user message. Keep the
+    // existing draft and let the person review it and send through DS Bot.
+    final prefix = '/${skill.name} ';
+    final draft = _input.text;
+    _input.value = TextEditingValue(
+      text: '$prefix$draft',
+      selection: TextSelection.collapsed(offset: prefix.length + draft.length),
+    );
+    _focus.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final status = ref.watch(dsBotProvider);
+    final chatProvider = botChatProvider(widget.botId);
+    final chat = ref.watch(chatProvider);
+    if (chat.staleTitle case final title?) {
+      return BotReconnectTranscript(
+        title: title,
+        items: chat.items,
+        room: false,
+        scrolledUnder: _scrolled,
+        error: chat.error ?? status.error,
+        onRetry: () {
+          if (ref.read(dsBotProvider).ready) {
+            unawaited(ref.read(chatProvider.notifier).reload());
+          } else {
+            ref.read(dsBotProvider.notifier).retry();
+          }
+        },
+      );
+    }
     final team = status.team;
     final bot = team?.bot(widget.botId);
     final mobileUnavailable =
@@ -108,7 +156,6 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
         children: [DsBotUnavailableMessage(status: status, goneIcon: AppIcons.bot, goneTitle: l10n.botsBotGone)],
       );
     }
-    final chat = ref.watch(botChatProvider(widget.botId));
     final work = status.live.bots[bot.id];
     final ownTurn = work != null && work.roomId == null;
     final question = team.questionOf(bot);
@@ -135,7 +182,13 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
 
     return BotChatFrame(
       header: BotChatHeader(
-        face: BotAvatar(bot: bot, size: BotChatHeader.faceSize),
+        face: BotAvatar(
+          bot: bot,
+          size: BotChatHeader.faceSize,
+          state: botAvatarState(status.live, bot.id, team: team),
+          badge: false,
+          live: true,
+        ),
         title: bot.name,
         status: label,
         tone: tone,
@@ -159,21 +212,31 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
                 padding: rowPadding(row),
                 child: switch (row) {
                   BotTimeRow(:final time) => BotTimeLine(time),
-                  BotPendingRow(:final pending) => BotUserMessage(text: pending.text, pending: true),
+                  BotPendingRow(:final pending) => BotUserMessage(
+                    text: pending.text,
+                    images: pending.images,
+                    pending: true,
+                  ),
                   BotStreamingRow(:final text) =>
                     text.isEmpty
                         ? const Align(alignment: Alignment.centerLeft, child: _Thinking())
-                        : BotReplyText(text: text, streaming: true),
+                        : BotReplyText(text: text, streaming: true, sessionId: bot.sessionId),
                   BotTypingRow() => const SizedBox.shrink(),
                   BotItemRow(:final item) => switch (item.kind) {
-                    DsBotItemKind.user => BotUserMessage(text: item.text, images: item.images),
+                    DsBotItemKind.user => BotUserMessage(
+                      text: item.text,
+                      images: item.images,
+                      attachments: item.imageRefs.isEmpty
+                          ? null
+                          : BotHistoryImages(item: item, conversationId: bot.sessionId, alignEnd: true),
+                    ),
                     DsBotItemKind.bot => _WithCards(
                       chat: chat,
                       item: item,
                       sessionId: bot.sessionId,
                       running: ownTurn,
                       onReply: readOnly ? null : (text) => _reply(sendTarget, bot.sessionId, text),
-                      child: BotReplyText(text: item.text),
+                      child: BotReplyMessage(item: item, conversationId: bot.sessionId),
                     ),
                     DsBotItemKind.event => BotEventLine(
                       text: chatEventText(item, roomName: rooms[item.roomId]),
@@ -217,13 +280,18 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
           error: chat.error,
           onDismiss: () => ref.read(botChatProvider(widget.botId).notifier).dismissError(),
         ),
-        Composer(
-          hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
+        BotComposer(
+          key: ValueKey((status.host, status.hello?.boot, api, bot.id, bot.sessionId)),
+          sendImages: status.supports('send-images'),
+          onPickSkill: bot.engine == null && status.ready && !readOnly
+              ? () => _pickSkill(sendTarget, bot.sessionId)
+              : null,
+          current: () => _sendsTo(sendTarget, bot.sessionId),
           controller: _input,
           focusNode: _focus,
           connected: api != null && !readOnly,
           running: ownTurn,
-          onSend: () => _send(sendTarget, bot.sessionId),
+          onSend: (images) => _send(sendTarget, bot.sessionId, images),
           onStop: _stopGuard.action(botId: bot.id),
           placeholder: l10n.botsComposerHint(bot.name),
         ),

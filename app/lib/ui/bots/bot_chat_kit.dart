@@ -14,6 +14,7 @@ import '../../l10n/l10n.dart';
 import '../../state/bots_state.dart';
 import '../chat/dsh_ui/dsh_ui.dart';
 import '../chat/render/markdown_body.dart';
+import '../chat/render/markdown_image.dart' show MarkdownImageScope;
 import '../chat/widgets/chat_card.dart';
 import '../chat/widgets/message_actions.dart';
 import '../chat/widgets/notice_row.dart';
@@ -27,6 +28,7 @@ import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'bot_avatar.dart';
 import 'bot_format.dart';
+import 'bot_history_images.dart';
 import 'bots_page.dart' show BotTag;
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -300,6 +302,75 @@ class BotChatFrame extends StatelessWidget {
   }
 }
 
+/// The previous transcript has display authority only. Keep its contents
+/// non-interactive, including Markdown links and inline cards.
+class BotReconnectTranscript extends StatelessWidget {
+  const BotReconnectTranscript({
+    super.key,
+    required this.title,
+    required this.items,
+    required this.room,
+    required this.scrolledUnder,
+    required this.onRetry,
+    this.error,
+  });
+
+  final String title;
+  final List<DsBotItem> items;
+  final bool room;
+  final ValueNotifier<double> scrolledUnder;
+  final VoidCallback onRetry;
+  final String? error;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return BotChatFrame(
+      header: BotChatHeader(
+        face: Icon(room ? AppIcons.groupChat : AppIcons.bot, size: 20),
+        title: title,
+        status: l10n.chatReconnecting,
+        tone: StatusTone.warn,
+        scrolledUnder: scrolledUnder,
+        onDetails: onRetry,
+        action: (AppIcons.refresh, l10n.commonRetry, onRetry),
+      ),
+      body: BotTranscript(
+        rows: transcriptRows(items),
+        topInset: BotChatHeader.heightOf(context),
+        scrolledUnder: scrolledUnder,
+        rowBuilder: (context, row) => Padding(
+          padding: rowPadding(row),
+          child: switch (row) {
+            BotTimeRow(:final time) => BotTimeLine(time),
+            BotItemRow(:final item) => switch (item.kind) {
+              DsBotItemKind.user => BotUserMessage(text: item.text, images: item.images),
+              DsBotItemKind.bot => Text.rich(
+                TextSpan(
+                  children: [
+                    if (item.name case final name? when room)
+                      TextSpan(
+                        text: '$name\n',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    TextSpan(text: item.text),
+                  ],
+                ),
+              ),
+              DsBotItemKind.event => BotEventLine(text: room ? roomEventText(item) : chatEventText(item)),
+              DsBotItemKind.answer => BotEventLine(text: l10n.botsAnsweredQuestion),
+              DsBotItemKind.divider => BotEventLine(text: l10n.botsEarlierMessages),
+              DsBotItemKind.unknown => const SizedBox.shrink(),
+            },
+            _ => const SizedBox.shrink(),
+          },
+        ),
+      ),
+      bottom: [if (error case final message?) Text(message, textAlign: TextAlign.center)],
+    );
+  }
+}
+
 /// An error over the composer, or nothing.
 class BotErrorSlot extends StatelessWidget {
   const BotErrorSlot({super.key, required this.error, required this.onDismiss});
@@ -536,10 +607,11 @@ class BotEventLine extends StatelessWidget {
 /// A Bot's words in its own chat: bare full-width Markdown, like the chat's
 /// replies; long-press copies or selects.
 class BotReplyText extends StatelessWidget {
-  const BotReplyText({super.key, required this.text, this.streaming = false});
+  const BotReplyText({super.key, required this.text, this.streaming = false, this.sessionId});
 
   final String text;
   final bool streaming;
+  final String? sessionId;
 
   Future<void> _menu(BuildContext context) async {
     final action = await showMessageMenu(
@@ -556,10 +628,31 @@ class BotReplyText extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onLongPress: streaming ? null : () => _menu(context),
-    child: MarkdownBody(text: text, streaming: streaming, selectable: false, repairBareViews: true),
-  );
+  Widget build(BuildContext context) {
+    final body = MarkdownBody(text: text, streaming: streaming, selectable: false, repairBareViews: true);
+    final session = sessionId;
+    return GestureDetector(
+      onLongPress: streaming ? null : () => _menu(context),
+      child: session == null ? body : MarkdownImageScope(sessionId: session, child: body),
+    );
+  }
+}
+
+/// A saved reply can have text (including Markdown images), attachment refs, or both.
+class BotReplyMessage extends StatelessWidget {
+  const BotReplyMessage({super.key, required this.item, required this.conversationId});
+
+  final DsBotItem item;
+  final String conversationId;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = BotReplyText(text: item.text, sessionId: item.sessionId ?? conversationId);
+    if (item.imageRefs.isEmpty) return body;
+    final images = BotHistoryImages(item: item, conversationId: conversationId);
+    if (item.text.isEmpty) return images;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [body, const SizedBox(height: 6), images]);
+  }
 }
 
 /// One message in a group: the speaker's face and name on the first of a
@@ -576,12 +669,14 @@ class GroupMessage extends StatelessWidget {
     required this.item,
     required this.bot,
     required this.continued,
+    required this.conversationId,
     this.admin = false,
     this.onOpenBot,
     this.onShowAll,
   });
 
   final DsBotItem item;
+  final String conversationId;
 
   /// Null when the speaker is no longer on the team.
   final DsBot? bot;
@@ -633,7 +728,7 @@ class GroupMessage extends StatelessWidget {
               ],
             ),
           ),
-        BotReplyText(text: item.text),
+        BotReplyMessage(item: item, conversationId: conversationId),
         if (onShowAll != null)
           TextButton(
             onPressed: onShowAll,
@@ -690,20 +785,22 @@ class BotTypingLine extends StatelessWidget {
 
 /// The person's message.
 class BotUserMessage extends StatelessWidget {
-  const BotUserMessage({super.key, required this.text, this.pending = false, this.images = 0});
+  const BotUserMessage({super.key, required this.text, this.pending = false, this.images = 0, this.attachments});
 
   final String text;
   final bool pending;
   final int images;
+  final Widget? attachments;
 
   @override
   Widget build(BuildContext context) {
-    if (dshUiReplyChip(text) case final label?) return DshUiReplyChip(label: label, pending: pending);
+    final reply = dshUiReplyChip(text);
+    if (attachments == null && reply != null) return DshUiReplyChip(label: reply, pending: pending);
     final l10n = context.l10n;
-    final shown = images > 0 && text.isEmpty ? l10n.botsImagePlaceholder : text;
+    final shown = attachments == null && images > 0 && text.isEmpty ? l10n.botsImagePlaceholder : text;
     return Align(
       alignment: Alignment.centerRight,
-      child: UserBubble(text: shown, pendingLabel: pending ? l10n.botsSending : null),
+      child: UserBubble(text: shown, attachments: attachments, pendingLabel: pending ? l10n.botsSending : null),
     );
   }
 }

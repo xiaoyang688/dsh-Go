@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../l10n/l10n.dart';
+import '../remote/https_launch_url.dart';
 import '../remote/link_status.dart';
 import '../remote/relay/dsh_remote_backend.dart';
 import 'android_features.dart';
@@ -745,3 +746,80 @@ class RelayAccountController extends AsyncNotifier<RelayAccountState> {
 final relayAccountProvider = AsyncNotifierProvider<RelayAccountController, RelayAccountState>(
   RelayAccountController.new,
 );
+
+/// A DSH Remote ID is only meaningful within its server and signed-in account.
+typedef RemoteHttpsScope = ({String server, String account});
+
+final remoteHttpsScopeProvider = Provider<RemoteHttpsScope?>((ref) {
+  final server = ref.watch(relayServerProvider) ?? defaultRelayServer;
+  // Never use AsyncValue.value here: it can hold the previous server's user
+  // while the replacement account is being loaded.
+  final account = ref.watch(
+    relayAccountProvider.select((value) => value.isLoading ? null : value.asData?.value.user?.id),
+  );
+  return account == null ? null : (server: server, account: account);
+});
+
+String _httpsSecretKey(RemoteHttpsScope scope, String hostId) =>
+    'https.launch.${base64UrlEncode(utf8.encode(jsonEncode([scope.server, scope.account, hostId])))}';
+
+/// Null means there is no usable HTTPS line for this Remote Host on this phone.
+final remoteHttpsLaunchUrlProvider = FutureProvider.autoDispose.family<Uri?, String>((ref, hostId) async {
+  final server = ref.watch(relayServerProvider) ?? defaultRelayServer;
+  final account = ref.watch(
+    relayAccountProvider.select(
+      (value) => (
+        loading: value.isLoading,
+        owner: value.asData?.value.hostById(hostId) == null ? null : value.asData?.value.user?.id,
+      ),
+    ),
+  );
+  final secrets = ref.watch(secretStoreProvider);
+  try {
+    final restored = account.loading ? await ref.read(relayAccountProvider.future) : null;
+    final owner = account.loading ? (restored?.hostById(hostId) == null ? null : restored?.user?.id) : account.owner;
+    if (!ref.mounted || owner == null) return null;
+    final value = await secrets.read(_httpsSecretKey((server: server, account: owner), hostId));
+    return value == null ? null : parseRemoteHttpsLaunchUrl(value);
+  } catch (_) {
+    throw const RemoteHttpsSettingsException();
+  }
+});
+
+/// Carries no storage error or credential text into UI or diagnostics.
+class RemoteHttpsSettingsException implements Exception {
+  const RemoteHttpsSettingsException();
+}
+
+final remoteHttpsSettingsProvider = Provider<RemoteHttpsSettings>(RemoteHttpsSettings.new);
+
+class RemoteHttpsSettings {
+  RemoteHttpsSettings(this._ref);
+
+  final Ref _ref;
+
+  /// [scope] is captured when the form opens. Never save into a new account
+  /// if the selected server or signed-in account changes before submission.
+  Future<void> save(RemoteHttpsScope scope, String hostId, String? input) async {
+    if (_ref.read(remoteHttpsScopeProvider) != scope ||
+        _ref.read(relayAccountProvider).asData?.value.hostById(hostId) == null) {
+      throw const RemoteHttpsSettingsException();
+    }
+    final url = input == null ? null : parseRemoteHttpsLaunchUrl(input);
+    if (input != null && url == null) throw const RemoteHttpsSettingsException();
+    final secrets = _ref.read(secretStoreProvider);
+    final key = _httpsSecretKey(scope, hostId);
+    try {
+      if (url == null) {
+        await secrets.delete(key);
+      } else {
+        await secrets.write(key, url.toString());
+      }
+    } catch (_) {
+      throw const RemoteHttpsSettingsException();
+    }
+    if (_ref.mounted && _ref.read(remoteHttpsScopeProvider) == scope) {
+      _ref.invalidate(remoteHttpsLaunchUrlProvider(hostId));
+    }
+  }
+}

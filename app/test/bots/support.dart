@@ -3,6 +3,7 @@
 
 import 'dart:async';
 
+import 'package:dsh_app/state/bot_layout_state.dart';
 import 'package:dsh_app/state/bots_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/notify_state.dart';
@@ -125,12 +126,25 @@ class RecordingNotifyChannel extends NotifyChannel {
   Future<void> cancel(String group, String key) async {}
 }
 
+class _NoIndependentLayout extends GoLayoutApi {
+  _NoIndependentLayout() : super(fakeConnection.client.rpc);
+
+  @override
+  Future<GoLayoutSettings?> describe() async => null;
+}
+
 /// DS Bot on 本机 through [transport].
-List<Override> dsBotOverrides(FakeDsBotTransport transport, {NotifyChannel? notify, HostConnection? connection}) => [
+List<Override> dsBotOverrides(
+  FakeDsBotTransport transport, {
+  NotifyChannel? notify,
+  HostConnection? connection,
+  GoLayoutApi? layoutApi,
+}) => [
   activeConnectionProvider.overrideWithValue(AsyncData(connection ?? fakeConnection)),
   dsBotApiFactoryProvider.overrideWithValue((_) => DsBotApi(transport)),
   localSafeModeProvider.overrideWithValue(false),
   if (notify != null) notifyChannelProvider.overrideWithValue(notify),
+  goLayoutApiProvider.overrideWithValue((_) => layoutApi ?? _NoIndependentLayout()),
 ];
 
 const tinyPhoto =

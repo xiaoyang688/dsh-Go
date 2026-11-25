@@ -3632,6 +3632,270 @@ abstract class L10n {
   /// **'未能更新后台保护，请查看当前状态后重试。'**
   String get backgroundProtectionUpdateFailed;
 
+  /// No description provided for @botsLayoutCopy.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制 DS Bot 布局'**
+  String get botsLayoutCopy;
+
+  /// No description provided for @botsLayoutCopied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已将布局复制到 DSH Go Layout。现在可以恢复官方 DS Bot。'**
+  String get botsLayoutCopied;
+
+  /// No description provided for @botsLayoutCopyFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法确认布局已复制。请先刷新主机布局再试。'**
+  String get botsLayoutCopyFailed;
+
+  /// No description provided for @botsLayoutLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法加载组织设置。点击重试。'**
+  String get botsLayoutLoadFailed;
+
+  /// No description provided for @botsLayoutEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑组织'**
+  String get botsLayoutEdit;
+
+  /// No description provided for @botsLayoutNewFolder.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建组织文件夹'**
+  String get botsLayoutNewFolder;
+
+  /// No description provided for @botsLayoutFolderName.
+  ///
+  /// In zh, this message translates to:
+  /// **'文件夹名称'**
+  String get botsLayoutFolderName;
+
+  /// No description provided for @botsLayoutInvalidName.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入 1–80 个字符作为文件夹名称。'**
+  String get botsLayoutInvalidName;
+
+  /// No description provided for @botsLayoutMove.
+  ///
+  /// In zh, this message translates to:
+  /// **'移动到文件夹'**
+  String get botsLayoutMove;
+
+  /// No description provided for @botsLayoutRoot.
+  ///
+  /// In zh, this message translates to:
+  /// **'顶层'**
+  String get botsLayoutRoot;
+
+  /// No description provided for @botsLayoutUp.
+  ///
+  /// In zh, this message translates to:
+  /// **'上移'**
+  String get botsLayoutUp;
+
+  /// No description provided for @botsLayoutDown.
+  ///
+  /// In zh, this message translates to:
+  /// **'下移'**
+  String get botsLayoutDown;
+
+  /// No description provided for @botsLayoutActions.
+  ///
+  /// In zh, this message translates to:
+  /// **'组织操作'**
+  String get botsLayoutActions;
+
+  /// No description provided for @botsLayoutDeleteFolder.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除文件夹？'**
+  String get botsLayoutDeleteFolder;
+
+  /// No description provided for @botsLayoutDeleteDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'其中的 Bot 和子文件夹将移到上一级。'**
+  String get botsLayoutDeleteDescription;
+
+  /// No description provided for @botsLayoutConflict.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机上的组织已变更。请重新打开编辑器以使用最新布局。'**
+  String get botsLayoutConflict;
+
+  /// No description provided for @botsLayoutDisconnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新连接主机后才能编辑组织。'**
+  String get botsLayoutDisconnected;
+
+  /// No description provided for @botsLayoutTooLarge.
+  ///
+  /// In zh, this message translates to:
+  /// **'该组织已达到主机的布局上限。'**
+  String get botsLayoutTooLarge;
+
+  /// No description provided for @botsGroupGoal.
+  ///
+  /// In zh, this message translates to:
+  /// **'群聊目标'**
+  String get botsGroupGoal;
+
+  /// No description provided for @botsGoalSet.
+  ///
+  /// In zh, this message translates to:
+  /// **'设定目标'**
+  String get botsGoalSet;
+
+  /// No description provided for @botsGoalPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'希望这个群聊达成什么？'**
+  String get botsGoalPrompt;
+
+  /// No description provided for @botsGoalDraftHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'群管理员会在聊天里和你一起明确目标及各个阶段。'**
+  String get botsGoalDraftHint;
+
+  /// No description provided for @botsGoalNeedsAdmin.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先设置群管理员，再设定目标。'**
+  String get botsGoalNeedsAdmin;
+
+  /// No description provided for @botsGoalSend.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送目标请求'**
+  String get botsGoalSend;
+
+  /// No description provided for @botsGoalDrafting.
+  ///
+  /// In zh, this message translates to:
+  /// **'拟定中'**
+  String get botsGoalDrafting;
+
+  /// No description provided for @botsGoalActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'进行中'**
+  String get botsGoalActive;
+
+  /// No description provided for @botsGoalWaiting.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待输入'**
+  String get botsGoalWaiting;
+
+  /// No description provided for @botsGoalPaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停'**
+  String get botsGoalPaused;
+
+  /// No description provided for @botsGoalComplete.
+  ///
+  /// In zh, this message translates to:
+  /// **'已完成'**
+  String get botsGoalComplete;
+
+  /// No description provided for @botsGoalStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'已停止'**
+  String get botsGoalStopped;
+
+  /// No description provided for @botsGoalPause.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停'**
+  String get botsGoalPause;
+
+  /// No description provided for @botsGoalResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续'**
+  String get botsGoalResume;
+
+  /// No description provided for @botsGoalStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止目标'**
+  String get botsGoalStop;
+
+  /// No description provided for @botsGoalStopWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'这将停止目标，并中断群内当前的工作。'**
+  String get botsGoalStopWarning;
+
+  /// No description provided for @botsGoalClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除目标'**
+  String get botsGoalClear;
+
+  /// No description provided for @botsGoalCancelDraft.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消目标草稿'**
+  String get botsGoalCancelDraft;
+
+  /// No description provided for @botsGoalChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标已变化，请查看后再继续。'**
+  String get botsGoalChanged;
+
+  /// No description provided for @botsGoalUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接或群聊已变化，请重新打开此面板。'**
+  String get botsGoalUnavailable;
+
+  /// No description provided for @botsGoalDoneWhen.
+  ///
+  /// In zh, this message translates to:
+  /// **'验收条件：{text}'**
+  String botsGoalDoneWhen(String text);
+
+  /// No description provided for @botsGoalEvidence.
+  ///
+  /// In zh, this message translates to:
+  /// **'验收依据：{text}'**
+  String botsGoalEvidence(String text);
+
+  /// No description provided for @botsGoalFeedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'反馈：{text}'**
+  String botsGoalFeedback(String text);
+
+  /// No description provided for @botsGoalCurrentStage.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前阶段'**
+  String get botsGoalCurrentStage;
+
+  /// No description provided for @botsGoalTaskReported.
+  ///
+  /// In zh, this message translates to:
+  /// **'已汇报'**
+  String get botsGoalTaskReported;
+
+  /// No description provided for @botsGoalTaskPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'未开始'**
+  String get botsGoalTaskPending;
+
   /// No description provided for @botsFolderGone.
   ///
   /// In zh, this message translates to:
@@ -4517,13 +4781,13 @@ abstract class L10n {
   /// No description provided for @botsRelayUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'经中转连接时用不了 Bot'**
+  /// **'这台远程主机的 DS Bot 不可用'**
   String get botsRelayUnavailable;
 
   /// No description provided for @botsUseSsh.
   ///
   /// In zh, this message translates to:
-  /// **'用 SSH 连接这台电脑即可使用'**
+  /// **'请确认主机已更新并启用 DSH Remote 和 DS Bot 插件，然后重新连接。也可以改用 SSH 连接。'**
   String get botsUseSsh;
 
   /// No description provided for @botsTeamLoadFailed.
@@ -32939,6 +33203,90 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'LAN 局域网'**
   String get remotePathLan;
+
+  /// No description provided for @remotePathHttps.
+  ///
+  /// In zh, this message translates to:
+  /// **'HTTPS'**
+  String get remotePathHttps;
+
+  /// No description provided for @remoteHttpsLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'HTTPS 专线'**
+  String get remoteHttpsLine;
+
+  /// No description provided for @remoteHttpsAuthorizationUrl.
+  ///
+  /// In zh, this message translates to:
+  /// **'HTTPS 授权链接'**
+  String get remoteHttpsAuthorizationUrl;
+
+  /// No description provided for @remoteHttpsHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'粘贴此主机的 DSH Web 授权链接，包含 token。手机会安全保存此链接，并优先尝试使用。HTTPS 不可用时，DSH Remote 可使用原有线路。'**
+  String get remoteHttpsHelp;
+
+  /// No description provided for @remoteHttpsConfigured.
+  ///
+  /// In zh, this message translates to:
+  /// **'已配置 HTTPS 专线'**
+  String get remoteHttpsConfigured;
+
+  /// No description provided for @remoteHttpsUnconfigured.
+  ///
+  /// In zh, this message translates to:
+  /// **'未配置 HTTPS 专线'**
+  String get remoteHttpsUnconfigured;
+
+  /// No description provided for @remoteHttpsLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在读取 HTTPS 设置…'**
+  String get remoteHttpsLoading;
+
+  /// No description provided for @remoteHttpsClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除专线'**
+  String get remoteHttpsClear;
+
+  /// No description provided for @remoteHttpsInvalidUrl.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入 HTTPS 链接，仅包含一个 token 参数，且不能包含片段、内嵌用户名或密码。'**
+  String get remoteHttpsInvalidUrl;
+
+  /// No description provided for @remoteHttpsScopeChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前账号或主机已变化，请重新打开此主机的 HTTPS 设置。'**
+  String get remoteHttpsScopeChanged;
+
+  /// No description provided for @remoteHttpsReadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取此手机上的 HTTPS 设置。'**
+  String get remoteHttpsReadFailed;
+
+  /// No description provided for @remoteHttpsSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法更新 HTTPS 设置，请确认主机仍在列表中并重试。'**
+  String get remoteHttpsSaveFailed;
+
+  /// No description provided for @remoteNetworkHttpsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前连接通过 TLS 访问已配置的 HTTPS 端点。'**
+  String get remoteNetworkHttpsHint;
+
+  /// No description provided for @remoteNetworkReasonHttpsUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能建立安全的 DSH Web 连接，已改用 DSH Remote 线路。'**
+  String get remoteNetworkReasonHttpsUnavailable;
 
   /// No description provided for @remotePathP2p.
   ///
