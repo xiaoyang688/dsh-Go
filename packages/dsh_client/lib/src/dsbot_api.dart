@@ -200,6 +200,20 @@ abstract interface class DsBotUnaryCarrier {
 class DsBotUnaryTransport implements DsBotTransport {
   DsBotUnaryTransport(this._post);
 
+  /// Some HTTPS gateways buffer the Bot event feed. Use the same authenticated
+  /// HTTP endpoint for calls and let the app refresh visible state by polling.
+  factory DsBotUnaryTransport.https(DshConnection connection) => DsBotUnaryTransport((
+    endpoint,
+    payload,
+    timeout,
+  ) async {
+    final response = await connection.postJson(DsBotHttpTransport.route, {
+      'endpoint': endpoint,
+      'payload': payload,
+    }, timeout: timeout);
+    return {'status': response.statusCode, 'json': response.statusCode == 200 ? tryDecodeJson(response.text) : null};
+  });
+
   final Future<Object?> Function(String endpoint, Map<String, Object?> payload, Duration? timeout) _post;
 
   @override
@@ -1668,7 +1682,10 @@ class DsBotApi {
   /// `dsBot/feed`); null when neither reaches DS Bot.
   static DsBotApi? of(DshClient client) {
     final carrier = client.carrier;
-    if (carrier is DshHttpCarrier) return DsBotApi(DsBotHttpTransport(carrier.connection));
+    if (carrier is DshHttpCarrier) {
+      final connection = carrier.connection;
+      return DsBotApi(connection.strictHttps ? DsBotUnaryTransport.https(connection) : DsBotHttpTransport(connection));
+    }
     if (DsBotRpcTransport.reachable(client)) return DsBotApi(DsBotRpcTransport(client));
     if (carrier is DsBotUnaryCarrier) {
       final transport = (carrier as DsBotUnaryCarrier).openDsBotUnaryTransport();

@@ -648,6 +648,14 @@ void main() {
     });
   });
 
+  test('a dedicated HTTPS client uses Bot polling instead of opening an event feed', () async {
+    final client = DshClient(DshConnection(Uri.parse('https://host.example/dsh/'), strictHttps: true));
+    addTearDown(client.close);
+    final transport = DsBotApi.of(client)!.transport;
+    expect(transport, isA<DsBotUnaryTransport>());
+    await expectLater(transport.openFeed(), emitsError(isA<DshRemoteException>()));
+  });
+
   test('a client on the HTTP carrier uses the route', () {
     final local = DshClient(DshConnection(host.baseUri));
     expect(DsBotApi.of(local)!.transport, isA<DsBotHttpTransport>());
